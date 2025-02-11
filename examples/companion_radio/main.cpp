@@ -813,6 +813,7 @@ void setup() {
   InternalFS.begin();
 
   the_mesh.begin(InternalFS, serial_interface, trng);
+  serial_interface.begin("MeshCore", BLE_PIN_CODE);
 #elif defined(ESP32)
   SPIFFS.begin(true);
 

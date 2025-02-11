@@ -4,60 +4,22 @@
 
 #include <bluefruit.h>
 
-class SerialBLEInterface : public BaseSerialInterface {//, BLESecurityCallbacks, BLEServerCallbacks, BLECharacteristicCallbacks {
-  BLEServer *pServer;
-  BLEService *pService;
-  BLECharacteristic * pTxCharacteristic;
-  bool deviceConnected;
-  bool oldDeviceConnected;
-  bool checkAdvRestart;
-  bool _isEnabled;
+class SerialBLEInterface : public BaseSerialInterface {
   uint32_t _pin_code;
-  unsigned long _last_write;
+  bool _isEnabled;
+  bool deviceConnected;
 
-  struct Frame {
-    uint8_t len;
-    uint8_t buf[MAX_FRAME_SIZE];
-  };
-
-  #define FRAME_QUEUE_SIZE  4
-  int recv_queue_len;
-  Frame recv_queue[FRAME_QUEUE_SIZE];
-  int send_queue_len;
-  Frame send_queue[FRAME_QUEUE_SIZE];
-
-  void clearBuffers() { recv_queue_len = 0; send_queue_len = 0; }
-
-protected:
-  // // BLESecurityCallbacks methods
-  // uint32_t onPassKeyRequest() override;
-  // void onPassKeyNotify(uint32_t pass_key) override;
-  // bool onConfirmPIN(uint32_t pass_key) override;
-  // bool onSecurityRequest() override;
-  // void onAuthenticationComplete(esp_ble_auth_cmpl_t cmpl) override;
-
-  // // BLEServerCallbacks methods
-  // void onConnect(BLEServer* pServer) override;
-  // void onConnect(BLEServer* pServer, esp_ble_gatts_cb_param_t *param) override;
-  // void onMtuChanged(BLEServer* pServer, esp_ble_gatts_cb_param_t* param) override;
-  // void onDisconnect(BLEServer* pServer) override;
-
-  // // BLECharacteristicCallbacks methods
-  // void onWrite(BLECharacteristic* pCharacteristic, esp_ble_gatts_cb_param_t* param) override;
+  BLEDfu bledfu;
+  BLEUart bleuart;
 
 public:
   SerialBLEInterface() {
-    pServer = NULL;
-    pService = NULL;
     deviceConnected = false;
-    oldDeviceConnected = false;
-    checkAdvRestart = false;
     _isEnabled = false;
-    _last_write = 0;
-    send_queue_len = recv_queue_len = 0;
   }
 
   void begin(const char* device_name, uint32_t pin_code);
+  void startAdv(void);
 
   // BaseSerialInterface methods
   void enable() override;
@@ -69,6 +31,11 @@ public:
   bool isWriteBusy() const override;
   size_t writeFrame(const uint8_t src[], size_t len) override;
   size_t checkRecvFrame(uint8_t dest[]) override;
+
+
+  static void rx_callback(uint16_t conn_hdl);
+  static void connect_callback(uint16_t conn_hdl);
+  static void disconnect_callback(uint16_t conn_hdl, uint8_t reason);
 };
 
 #if BLE_DEBUG_LOGGING && ARDUINO
