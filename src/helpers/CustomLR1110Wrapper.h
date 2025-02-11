@@ -16,6 +16,12 @@ public:
 
     return activity;
   }
+
+  void onSendFinished() override {
+    RadioLibWrapper::onSendFinished();
+    _radio->setPreambleLength(8); // overcomes weird issues with small and big pkts
+  }
+
   float getLastRSSI() const override { return ((CustomLR1110 *)_radio)->getRSSI(); }
   float getLastSNR() const override { return ((CustomLR1110 *)_radio)->getSNR(); }
 };
