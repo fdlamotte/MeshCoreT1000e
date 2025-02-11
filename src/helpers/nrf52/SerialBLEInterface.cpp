@@ -7,8 +7,12 @@
 #define CHARACTERISTIC_UUID_RX "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
 #define CHARACTERISTIC_UUID_TX "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
 
+static SerialBLEInterface * _theOne;
+
 void SerialBLEInterface::begin(const char* device_name, uint32_t pin_code) {
   _pin_code = pin_code;
+
+  _theOne = this;
 
   Bluefruit.begin(1, 1);
   Bluefruit.setTxPower(4);    // Check bluefruit.h for supported values
@@ -53,20 +57,6 @@ void SerialBLEInterface::startAdv(void)
   Bluefruit.Advertising.start(0);                // 0 = Don't stop advertising after n seconds  
 }
 
-// -------- BLEServerCallbacks methods
-
-  void SerialBLEInterface::rx_callback(uint16_t conn_hdl) {
-    BLE_DEBUG_PRINTLN("RECV");
-  }
-  
-  void SerialBLEInterface::connect_callback(uint16_t conn_hdl){
-    BLE_DEBUG_PRINTLN("CX");
-  }
-  void SerialBLEInterface::disconnect_callback(uint16_t conn_hdl, uint8_t reason){
-    BLE_DEBUG_PRINTLN("DCX");
-  }
-
-
 // ---------- public methods
 
 void SerialBLEInterface::enable() { 
@@ -79,23 +69,88 @@ void SerialBLEInterface::disable() {
   _isEnabled = false;
 
   BLE_DEBUG_PRINTLN("SerialBLEInterface::disable");
-
 }
 
 size_t SerialBLEInterface::writeFrame(const uint8_t src[], size_t len) {
+  if (len > MAX_FRAME_SIZE) {
+    BLE_DEBUG_PRINTLN("writeFrame(), frame too big, len=%d", len);
+    return 0;
+  }
+
+  if (deviceConnected && len > 0) {
+    if (send_queue_len >= FRAME_QUEUE_SIZE) {
+      BLE_DEBUG_PRINTLN("writeFrame(), send_queue is full!");
+      return 0;
+    }
+
+    send_queue[send_queue_len].len = len;  // add to send queue
+    memcpy(send_queue[send_queue_len].buf, src, len);
+    send_queue_len++;
+
+    return len;
+  }
   return 0;
 }
 
 #define  BLE_WRITE_MIN_INTERVAL   20
 
 bool SerialBLEInterface::isWriteBusy() const {
-  return true;//millis() < _last_write + BLE_WRITE_MIN_INTERVAL;   // still too soon to start another write?
+  return millis() < _last_write + BLE_WRITE_MIN_INTERVAL;   // still too soon to start another write?
 }
 
 size_t SerialBLEInterface::checkRecvFrame(uint8_t dest[]) {
-  return 0;
+  if (send_queue_len > 0   // first, check send queue
+    && millis() >= _last_write + BLE_WRITE_MIN_INTERVAL    // space the writes apart
+  ) {
+    _last_write = millis();
+    bleuart.write(send_queue[0].buf, send_queue[0].len);
+    //pTxCharacteristic->setValue(send_queue[0].buf, send_queue[0].len);
+    //pTxCharacteristic->notify();
+
+    BLE_DEBUG_PRINTLN("writeBytes: sz=%d, hdr=%d", (uint32_t)send_queue[0].len, (uint32_t) send_queue[0].buf[0]);
+
+    send_queue_len--;
+    for (int i = 0; i < send_queue_len; i++) {   // delete top item from queue
+      send_queue[i] = send_queue[i + 1];
+    }
+  }
+
+  if (recv_queue_len > 0) {   // check recv queue
+    size_t len = recv_queue[0].len;   // take from top of queue
+    memcpy(dest, recv_queue[0].buf, len);
+
+    BLE_DEBUG_PRINTLN("readBytes: sz=%d, hdr=%d", len, (uint32_t) dest[0]);
+
+    recv_queue_len--;
+    for (int i = 0; i < recv_queue_len; i++) {   // delete top item from queue
+      recv_queue[i] = recv_queue[i + 1];
+    }
+    return len;
+  }
 }
 
 bool SerialBLEInterface::isConnected() const {
   return deviceConnected;  //pServer != NULL && pServer->getConnectedCount() > 0;
+}
+
+// Serial callbacks
+
+void SerialBLEInterface::onWrite(uint16_t conn_hdl) {
+  int len = bleuart.read(recv_queue[recv_queue_len].buf, MAX_FRAME_SIZE);
+  recv_queue[recv_queue_len].len = len;
+  recv_queue_len++;
+}
+
+void SerialBLEInterface::rx_callback(uint16_t conn_hdl) {
+  _theOne->onWrite(conn_hdl);
+  BLE_DEBUG_PRINTLN("RECV");
+}
+
+void SerialBLEInterface::connect_callback(uint16_t conn_hdl){
+  _theOne->deviceConnected = true;
+  BLE_DEBUG_PRINTLN("CX");
+}
+void SerialBLEInterface::disconnect_callback(uint16_t conn_hdl, uint8_t reason){
+  _theOne->deviceConnected = false;
+  BLE_DEBUG_PRINTLN("DCX");
 }
