@@ -467,7 +467,7 @@ public:
   }
 
   void handleCmdFrame(size_t len) {
-    if (cmd_frame[0] == CMD_APP_START && len >= 8) {   // sent when app establishes connection, respond with node ID
+    if (cmd_frame[0] == CMD_APP_START && len >= 8) {   // sent when app establishes connection, respond with node Ik
       uint8_t app_ver = cmd_frame[1];
       //  cmd_frame[2..7]  reserved future
       char* app_name = (char *) &cmd_frame[8];

@@ -26,6 +26,7 @@ class SerialBLEInterface : public BaseSerialInterface {
 
   BLEDfu bledfu;
   BLEUart bleuart;
+  BLEDis  bledis;  // device information
 
 public:
   SerialBLEInterface() {

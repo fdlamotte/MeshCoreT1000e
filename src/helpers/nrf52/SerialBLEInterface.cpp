@@ -14,14 +14,23 @@ void SerialBLEInterface::begin(const char* device_name, uint32_t pin_code) {
 
   _theOne = this;
 
-  Bluefruit.begin(1, 1);
+  Bluefruit.configPrphBandwidth(BANDWIDTH_MAX);
+
+  Bluefruit.begin(1, 0); // 1 periph, 1 central
   Bluefruit.setTxPower(4);    // Check bluefruit.h for supported values
   Bluefruit.setName("MeshCore"); // useful testing with multiple central connections
+
   Bluefruit.Periph.setConnectCallback(connect_callback);
   Bluefruit.Periph.setDisconnectCallback(disconnect_callback);
 
   bledfu.begin();
 
+  // Configure and Start Device Information Service
+  bledis.setManufacturer("MeshCore");
+  bledis.setModel("T1000e");
+  bledis.begin();
+
+//  bleuart.bufferTXD(true);
   bleuart.begin();
   bleuart.setRxCallback(rx_callback);
 
