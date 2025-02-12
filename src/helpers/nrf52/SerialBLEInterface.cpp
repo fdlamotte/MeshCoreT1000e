@@ -99,6 +99,10 @@ bool SerialBLEInterface::isWriteBusy() const {
 }
 
 size_t SerialBLEInterface::checkRecvFrame(uint8_t dest[]) {
+  if (!deviceConnected) {
+    return 0;
+  }
+
   if (send_queue_len > 0   // first, check send queue
     && millis() >= _last_write + BLE_WRITE_MIN_INTERVAL    // space the writes apart
   ) {
@@ -127,6 +131,7 @@ size_t SerialBLEInterface::checkRecvFrame(uint8_t dest[]) {
     }
     return len;
   }
+  return 0;
 }
 
 bool SerialBLEInterface::isConnected() const {
@@ -136,7 +141,8 @@ bool SerialBLEInterface::isConnected() const {
 // Serial callbacks
 
 void SerialBLEInterface::onWrite(uint16_t conn_hdl) {
-  int len = bleuart.read(recv_queue[recv_queue_len].buf, MAX_FRAME_SIZE);
+  int len;
+  len = bleuart.read(recv_queue[recv_queue_len].buf, MAX_FRAME_SIZE);
   recv_queue[recv_queue_len].len = len;
   recv_queue_len++;
 }
@@ -148,6 +154,7 @@ void SerialBLEInterface::rx_callback(uint16_t conn_hdl) {
 
 void SerialBLEInterface::connect_callback(uint16_t conn_hdl){
   _theOne->deviceConnected = true;
+  _theOne->clearBuffers();
   BLE_DEBUG_PRINTLN("CX");
 }
 void SerialBLEInterface::disconnect_callback(uint16_t conn_hdl, uint8_t reason){
