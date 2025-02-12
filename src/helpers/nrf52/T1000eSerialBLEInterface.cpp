@@ -1,4 +1,4 @@
-#include "SerialBLEInterface.h"
+#include "T1000eSerialBLEInterface.h"
 
 // See the following for generating UUIDs:
 // https://www.uuidgenerator.net/
@@ -7,9 +7,9 @@
 #define CHARACTERISTIC_UUID_RX "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
 #define CHARACTERISTIC_UUID_TX "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
 
-static SerialBLEInterface * _theOne;
+static T1000eSerialBLEInterface * _theOne;
 
-void SerialBLEInterface::begin(const char* device_name, uint32_t pin_code) {
+void T1000eSerialBLEInterface::begin(const char* device_name, uint32_t pin_code) {
   _pin_code = pin_code;
   char charpin[20];
   sprintf(charpin, "%d", _pin_code);
@@ -41,7 +41,7 @@ void SerialBLEInterface::begin(const char* device_name, uint32_t pin_code) {
 
 }
 
-void SerialBLEInterface::startAdv(void)
+void T1000eSerialBLEInterface::startAdv(void)
 {
   // Advertising packet
   Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
@@ -71,19 +71,19 @@ void SerialBLEInterface::startAdv(void)
 
 // ---------- public methods
 
-void SerialBLEInterface::enable() { 
+void T1000eSerialBLEInterface::enable() { 
   if (_isEnabled) return;
 
   _isEnabled = true;
 }
 
-void SerialBLEInterface::disable() {
+void T1000eSerialBLEInterface::disable() {
   _isEnabled = false;
 
-  BLE_DEBUG_PRINTLN("SerialBLEInterface::disable");
+  BLE_DEBUG_PRINTLN("T1000eSerialBLEInterface::disable");
 }
 
-size_t SerialBLEInterface::writeFrame(const uint8_t src[], size_t len) {
+size_t T1000eSerialBLEInterface::writeFrame(const uint8_t src[], size_t len) {
   if (len > MAX_FRAME_SIZE) {
     BLE_DEBUG_PRINTLN("writeFrame(), frame too big, len=%d", len);
     return 0;
@@ -106,11 +106,11 @@ size_t SerialBLEInterface::writeFrame(const uint8_t src[], size_t len) {
 
 #define  BLE_WRITE_MIN_INTERVAL   20
 
-bool SerialBLEInterface::isWriteBusy() const {
+bool T1000eSerialBLEInterface::isWriteBusy() const {
   return millis() < _last_write + BLE_WRITE_MIN_INTERVAL;   // still too soon to start another write?
 }
 
-size_t SerialBLEInterface::checkRecvFrame(uint8_t dest[]) {
+size_t T1000eSerialBLEInterface::checkRecvFrame(uint8_t dest[]) {
   if (!deviceConnected) {
     return 0;
   }
@@ -146,30 +146,30 @@ size_t SerialBLEInterface::checkRecvFrame(uint8_t dest[]) {
   return 0;
 }
 
-bool SerialBLEInterface::isConnected() const {
+bool T1000eSerialBLEInterface::isConnected() const {
   return deviceConnected;  //pServer != NULL && pServer->getConnectedCount() > 0;
 }
 
 // Serial callbacks
 
-void SerialBLEInterface::onWrite(uint16_t conn_hdl) {
+void T1000eSerialBLEInterface::onWrite(uint16_t conn_hdl) {
   int len;
   len = bleuart.read(recv_queue[recv_queue_len].buf, MAX_FRAME_SIZE);
   recv_queue[recv_queue_len].len = len;
   recv_queue_len++;
 }
 
-void SerialBLEInterface::rx_callback(uint16_t conn_hdl) {
+void T1000eSerialBLEInterface::rx_callback(uint16_t conn_hdl) {
   _theOne->onWrite(conn_hdl);
   BLE_DEBUG_PRINTLN("RECV");
 }
 
-void SerialBLEInterface::connect_callback(uint16_t conn_hdl){
+void T1000eSerialBLEInterface::connect_callback(uint16_t conn_hdl){
   _theOne->deviceConnected = true;
   _theOne->clearBuffers();
   BLE_DEBUG_PRINTLN("CX");
 }
-void SerialBLEInterface::disconnect_callback(uint16_t conn_hdl, uint8_t reason){
+void T1000eSerialBLEInterface::disconnect_callback(uint16_t conn_hdl, uint8_t reason){
   _theOne->deviceConnected = false;
   BLE_DEBUG_PRINTLN("DCX");
 }

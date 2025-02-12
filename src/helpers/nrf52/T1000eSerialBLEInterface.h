@@ -5,7 +5,7 @@
 #include <bluefruit.h>
 
 
-class SerialBLEInterface : public BaseSerialInterface {
+class T1000eSerialBLEInterface : public BaseSerialInterface {
   uint32_t _pin_code;
   bool _isEnabled;
   bool deviceConnected;
@@ -29,7 +29,7 @@ class SerialBLEInterface : public BaseSerialInterface {
   BLEDis  bledis;  // device information
 
 public:
-  SerialBLEInterface() {
+  T1000eSerialBLEInterface() {
     deviceConnected = false;
     _isEnabled = false;
     _last_write = 0;
