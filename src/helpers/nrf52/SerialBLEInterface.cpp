@@ -11,6 +11,8 @@ static SerialBLEInterface * _theOne;
 
 void SerialBLEInterface::begin(const char* device_name, uint32_t pin_code) {
   _pin_code = pin_code;
+  char charpin[20];
+  sprintf(charpin, "%d", _pin_code);
 
   _theOne = this;
 
@@ -19,6 +21,7 @@ void SerialBLEInterface::begin(const char* device_name, uint32_t pin_code) {
   Bluefruit.begin(1, 0); // 1 periph, 1 central
   Bluefruit.setTxPower(4);    // Check bluefruit.h for supported values
   Bluefruit.setName("MeshCore"); // useful testing with multiple central connections
+  Bluefruit.Security.setPIN(charpin);
 
   Bluefruit.Periph.setConnectCallback(connect_callback);
   Bluefruit.Periph.setDisconnectCallback(disconnect_callback);
