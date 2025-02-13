@@ -730,8 +730,8 @@ public:
     }
     if (millisHasNowPassed(next_gps_update)) {
       if (nmea.isValid()) {
-        _prefs.node_lat = nmea.getLatitude()/1000000.;
-        _prefs.node_lon = nmea.getLongitude()/1000000.;
+        _prefs.node_lat = ((double)nmea.getLatitude())/1000000.;
+        _prefs.node_lon = ((double)nmea.getLongitude())/1000000.;
       }
       next_gps_update = futureMillis(5000);
     } 
