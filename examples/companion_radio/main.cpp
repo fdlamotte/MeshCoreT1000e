@@ -17,6 +17,8 @@
 #include <helpers/BaseSerialInterface.h>
 #include <RTClib.h>
 
+#include "gps.h"
+
 /* ---------------------------------- CONFIGURATION ------------------------------------- */
 
 #ifndef LORA_FREQ
@@ -827,8 +829,23 @@ void setup() {
 #else
   #error "need to define filesystem"
 #endif
+
+  // GPS Setup
+
+  digitalWrite(PIN_GPS_EN, GPS_EN_ACTIVE);
+
+  gps_setup();
+
 }
 
 void loop() {
+  static int nextCheck = 0;
+  if (the_mesh.millisHasNowPassed(nextCheck)) {
+
+    gps_loop();
+
+    nextCheck = the_mesh.futureMillis(1000);
+  }
+
   the_mesh.loop();
 }
