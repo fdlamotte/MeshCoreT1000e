@@ -368,6 +368,7 @@ protected:
   void onChannelMessageRecv(const mesh::GroupChannel& channel, int in_path_len, uint32_t timestamp, const char *text) override {
     int i = 0;
     out_frame[i++] = RESP_CODE_CHANNEL_MSG_RECV;
+    out_frame[i++] = 0;  // FUTURE: channel_idx (will just be 'public' for now)
     out_frame[i++] = in_path_len < 0 ? 0xFF : in_path_len;
     out_frame[i++] = TXT_TYPE_PLAIN;
     memcpy(&out_frame[i], &timestamp, 4); i += 4;
@@ -467,7 +468,7 @@ public:
   }
 
   void handleCmdFrame(size_t len) {
-    if (cmd_frame[0] == CMD_APP_START && len >= 8) {   // sent when app establishes connection, respond with node Ik
+    if (cmd_frame[0] == CMD_APP_START && len >= 8) {   // sent when app establishes connection, respond with node ID
       uint8_t app_ver = cmd_frame[1];
       //  cmd_frame[2..7]  reserved future
       char* app_name = (char *) &cmd_frame[8];
@@ -529,26 +530,18 @@ public:
         writeErrFrame(); // unknown recipient, or unsuported TXT_TYPE_*
       }
     } else if (cmd_frame[0] == CMD_SEND_CHANNEL_TXT_MSG) {  // send GroupChannel msg
-  #if 0  //TODO
-      uint8_t temp[5+MAX_TEXT_LEN+32];
-      uint32_t timestamp = getRTCClock()->getCurrentTime();
-      memcpy(temp, &timestamp, 4);   // mostly an extra blob to help make packet_hash unique
-      temp[4] = 0;  // attempt and flags
+      int i = 1;
+      uint8_t txt_type = cmd_frame[i++];  // should be TXT_TYPE_PLAIN
+      uint8_t channel_idx = cmd_frame[i++];   // reserved future
+      uint32_t msg_timestamp;
+      memcpy(&msg_timestamp, &cmd_frame[i], 4); i += 4;
+      const char *text = (char *) &cmd_frame[i];
 
-      sprintf((char *) &temp[5], "%s: %s", self_name, &command[7]);  // <sender>: <msg>
-      temp[5 + MAX_TEXT_LEN] = 0;  // truncate if too long
-
-      int len = strlen((char *) &temp[5]);
-      auto pkt = createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, *_public, temp, 5 + len);
-      if (pkt) {
-        sendFlood(pkt);
-        Serial.println("   Sent.");
+      if (txt_type == TXT_TYPE_PLAIN && sendGroupMessage(msg_timestamp, *_public, _prefs.node_name, text, len - i)) {   // hard-coded to 'public' channel for now
+        writeOKFrame();
       } else {
-        Serial.println("   ERROR: unable to send");
+        writeErrFrame();
       }
-  #else
-      writeErrFrame();
-  #endif
     } else if (cmd_frame[0] == CMD_GET_CONTACTS) {  // get Contact list
       if (_iter_started) {
         writeErrFrame();   // iterator is currently busy
@@ -747,7 +740,6 @@ public:
   #ifdef BLE_PIN_CODE
     #include <helpers/nrf52/SerialBLEInterface.h>
     SerialBLEInterface serial_interface;
-    //#error "BLE not defined yet"
   #else
     #include <helpers/ArduinoSerialInterface.h>
     ArduinoSerialInterface serial_interface;
