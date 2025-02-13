@@ -745,8 +745,10 @@ public:
   #endif
 #elif defined(NRF52_PLATFORM)
   #ifdef BLE_PIN_CODE
-    #include <helpers/nrf52/T1000eSerialBLEInterface.h>
-    T1000eSerialBLEInterface serial_interface;
+    //#include <helpers/nrf52/T1000eSerialBLEInterface.h>
+    #include <helpers/nrf52/SerialBLEInterface.h>
+    //T1000eSerialBLEInterface serial_interface;
+    SerialBLEInterface serial_interface;
     //#error "BLE not defined yet"
   #else
     #include <helpers/ArduinoSerialInterface.h>
