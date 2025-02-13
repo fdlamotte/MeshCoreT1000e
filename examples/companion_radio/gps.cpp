@@ -60,31 +60,33 @@ void gps_setup(void)
 
 	nmea.setUnknownSentenceHandler(printUnknownSentence);
 
-//	console.println("Resetting GPS module ...");
-//	gpsHardwareReset();
-//	console.println("... done");
+	console.println("Resetting GPS module ...");
+	gpsHardwareReset();
+	console.println("... done");
 
 	// Clear the list of messages which are sent.
 	MicroNMEA::sendSentence(gps, "$PORZB");
 
 	// Send only RMC and GGA messages.
-	MicroNMEA::sendSentence(gps, "$PORZB,RMC,1,GGA,1");
+	//MicroNMEA::sendSentence(gps, "$PORZB,RMC,1,GGA,1");
 
 	// Disable compatability mode (NV08C-CSM proprietary message) and
 	// adjust precision of time and position fields
-	MicroNMEA::sendSentence(gps, "$PNVGNME,2,9,1");
+	//MicroNMEA::sendSentence(gps, "$PNVGNME,2,9,1");
 	// MicroNMEA::sendSentence(gps, "$PONME,2,4,1,0");
-
+	//MicroNMEA::sendSentence(gps, "$PMTK314,5,5,5,5,5,5,0,0,0,0,0,0,10,10");
 }
 
+void gps_feed_nmea() {
 
-void gps_loop() {
 	while (gps.available()) {
 		char c = gps.read();
 		console.print(c);
 		nmea.process(c);
 	}
+}
 
+void gps_loop() {
   if (nmea.isValid()) {
     digitalWrite(LED_PIN, LOW);
     long latitude_mdeg = nmea.getLatitude();

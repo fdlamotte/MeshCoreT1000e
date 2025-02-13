@@ -839,12 +839,15 @@ void setup() {
 }
 
 void loop() {
+
+  gps_feed_nmea();
+
   static int nextCheck = 0;
   if (the_mesh.millisHasNowPassed(nextCheck)) {
 
     gps_loop();
 
-    nextCheck = the_mesh.futureMillis(1000);
+    nextCheck = the_mesh.futureMillis(5000);
   }
 
   the_mesh.loop();
