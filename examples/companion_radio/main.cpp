@@ -706,6 +706,7 @@ public:
 
   void loop() {
     BaseChatMesh::loop();
+    static long next_gps_update = 0;
     size_t len = _serial->checkRecvFrame(cmd_frame);
     if (len > 0) {
       handleCmdFrame(len);
@@ -727,6 +728,13 @@ public:
         _iter_started = false;
       }
     }
+    if (millisHasNowPassed(next_gps_update)) {
+      if (nmea.isValid()) {
+        _prefs.node_lat = nmea.getLatitude()/1000000.;
+        _prefs.node_lon = nmea.getLongitude()/1000000.;
+      }
+      next_gps_update = futureMillis(5000);
+    } 
   }
 };
 

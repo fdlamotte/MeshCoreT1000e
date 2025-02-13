@@ -88,15 +88,15 @@ void gps_feed_nmea() {
 
 void gps_loop() {
   if (nmea.isValid()) {
-    digitalWrite(LED_PIN, LOW);
+	ledState = !ledState;
+    digitalWrite(LED_PIN, ledState);
     long latitude_mdeg = nmea.getLatitude();
     long longitude_mdeg = nmea.getLongitude();
-    console.print("\nLatitude (deg): ");
+    console.print("Latitude (deg): ");
     console.println(latitude_mdeg / 1000000., 6);
     console.print("Longitude (deg): ");
     console.println(longitude_mdeg / 1000000., 6);
   } else {
     digitalWrite(LED_PIN, HIGH);
   }
-
 }
