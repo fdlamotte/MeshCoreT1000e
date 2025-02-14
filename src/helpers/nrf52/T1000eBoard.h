@@ -3,19 +3,18 @@
 #include <MeshCore.h>
 #include <Arduino.h>
 
-// LoRa pins from variant.h
-#define  P_LORA_DIO_1   LORA_DIO1
-#define  P_LORA_NSS     LORA_CS
-#define  P_LORA_RESET  LORA_RESET
-#define  P_LORA_BUSY    LORA_DIO2
-#define  P_LORA_SCLK    PIN_SPI_SCK
-#define  P_LORA_MISO    PIN_SPI_MISO
-#define  P_LORA_MOSI    PIN_SPI_MOSI
+// LoRa and SPI pins
+#define  P_LORA_DIO_1   (32 + 1)  // P1.1
+#define  P_LORA_NSS     (0 + 12)  // P0.12
+#define  P_LORA_RESET   (32 + 10) // P1.10
+#define  P_LORA_BUSY    (0 + 7)   // P0.7
+#define  P_LORA_SCLK    (0 + 11)  // P0.11
+#define  P_LORA_MISO    (32 + 8)  // P1.8
+#define  P_LORA_MOSI    (32 + 9)  // P0.9
 #define  LR1110_POWER_EN  37
  
-// already defined in variant.h
-//#define LR11X0_DIO_AS_RF_SWITCH  true
-//#define LR11X0_DIO3_TCXO_VOLTAGE   1.6
+#define LR11X0_DIO_AS_RF_SWITCH  true
+#define LR11X0_DIO3_TCXO_VOLTAGE   1.6
 
 // built-ins
 //#define  PIN_VBAT_READ    5
