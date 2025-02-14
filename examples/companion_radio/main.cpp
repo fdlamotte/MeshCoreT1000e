@@ -179,14 +179,13 @@ class MyMesh : public BaseChatMesh {
           ContactInfo c;
           uint8_t pub_key[32];
           uint8_t unused;
-          uint32_t reserved;
 
           bool success = (file.read(pub_key, 32) == 32);
           success = success && (file.read((uint8_t *) &c.name, 32) == 32);
           success = success && (file.read(&c.type, 1) == 1);
           success = success && (file.read(&c.flags, 1) == 1);
           success = success && (file.read(&unused, 1) == 1);
-          success = success && (file.read((uint8_t *) &reserved, 4) == 4);
+          success = success && (file.read((uint8_t *) &c.sync_since, 4) == 4);  // was 'reserved'
           success = success && (file.read((uint8_t *) &c.out_path_len, 1) == 1);
           success = success && (file.read((uint8_t *) &c.last_advert_timestamp, 4) == 4);
           success = success && (file.read(c.out_path, 64) == 64);
@@ -215,7 +214,6 @@ class MyMesh : public BaseChatMesh {
       ContactsIterator iter;
       ContactInfo c;
       uint8_t unused = 0;
-      uint32_t reserved = 0;
 
       while (iter.hasNext(this, c)) {
         bool success = (file.write(c.id.pub_key, 32) == 32);
@@ -223,7 +221,7 @@ class MyMesh : public BaseChatMesh {
         success = success && (file.write(&c.type, 1) == 1);
         success = success && (file.write(&c.flags, 1) == 1);
         success = success && (file.write(&unused, 1) == 1);
-        success = success && (file.write((uint8_t *) &reserved, 4) == 4);
+        success = success && (file.write((uint8_t *) &c.sync_since, 4) == 4);
         success = success && (file.write((uint8_t *) &c.out_path_len, 1) == 1);
         success = success && (file.write((uint8_t *) &c.last_advert_timestamp, 4) == 4);
         success = success && (file.write(c.out_path, 64) == 64);
@@ -390,6 +388,11 @@ protected:
     }
   }
 
+  void onContactResponse(const ContactInfo& contact, const uint8_t* data, uint8_t len) override {
+    // TODO: check for login response
+    // TODO: check for Get Stats response
+  }
+
   uint32_t calcFloodTimeoutMillisFor(uint32_t pkt_airtime_millis) const override {
     return SEND_TIMEOUT_BASE_MILLIS + (FLOOD_SEND_TIMEOUT_FACTOR * pkt_airtime_millis);
   }
@@ -399,7 +402,6 @@ protected:
   }
 
   void onSendTimeout() override {
-    Serial.println("   ERROR: timed out, no ACK.");
   }
 
 public:
@@ -421,9 +423,8 @@ public:
     _prefs.tx_power_dbm = LORA_TX_POWER;
   }
 
-  void begin(FILESYSTEM& fs, BaseSerialInterface& serial, mesh::RNG& trng) {
+  void begin(FILESYSTEM& fs, mesh::RNG& trng) {
     _fs = &fs;
-    _serial = &serial;
 
     BaseChatMesh::begin();
 
@@ -454,6 +455,13 @@ public:
     _phy->setBandwidth(_prefs.bw);
     _phy->setCodingRate(_prefs.cr);
     _phy->setOutputPower(_prefs.tx_power_dbm);
+  }
+
+  const char* getNodeName() { return _prefs.node_name; }
+
+  void startInterface(BaseSerialInterface& serial) {
+    _serial = &serial;
+    serial.enable();
   }
 
   void savePrefs() {
@@ -638,6 +646,7 @@ public:
         ContactInfo contact;
         updateContactFromFrame(contact, cmd_frame, len);
         contact.lastmod = getRTCClock()->getCurrentTime();
+        contact.sync_since = 0;
         if (addContact(contact)) {
           saveContacts();
           writeOKFrame();
@@ -813,41 +822,39 @@ void setup() {
 
 #if defined(NRF52_PLATFORM)
   InternalFS.begin();
+  the_mesh.begin(InternalFS, trng);
 
 #ifdef BLE_PIN_CODE
-  serial_interface.begin("MeshCore", BLE_PIN_CODE);
+  char dev_name[32+10];
+  sprintf(dev_name, "MeshCore-%s", the_mesh.getNodeName());
+  serial_interface.begin(dev_name, BLE_PIN_CODE);
 #else
   pinMode(WB_IO2, OUTPUT);
   serial_interface.begin(Serial);
 #endif
-  serial_interface.enable();
-
-  the_mesh.begin(InternalFS, serial_interface, trng);
+  the_mesh.startInterface(serial_interface);
 #elif defined(ESP32)
   SPIFFS.begin(true);
+  the_mesh.begin(SPIFFS, trng);
 
 #ifdef BLE_PIN_CODE
-  serial_interface.begin("MeshCore", BLE_PIN_CODE);
+  char dev_name[32+10];
+  sprintf(dev_name, "MeshCore-%s", the_mesh.getNodeName());
+  serial_interface.begin(dev_name, BLE_PIN_CODE);
 #else
   serial_interface.begin(Serial);
 #endif
-  serial_interface.enable();
-
-  the_mesh.begin(SPIFFS, serial_interface, trng);
+  the_mesh.startInterface(serial_interface);
 #else
   #error "need to define filesystem"
 #endif
 
   // GPS Setup
-
   digitalWrite(PIN_GPS_EN, GPS_EN_ACTIVE);
-
   gps_setup();
-
 }
 
 void loop() {
-
   gps_feed_nmea();
 
   static int nextCheck = 0;
