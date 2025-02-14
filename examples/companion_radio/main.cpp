@@ -162,6 +162,7 @@ class MyMesh : public BaseChatMesh {
   bool  _iter_started;
   uint8_t cmd_frame[MAX_FRAME_SIZE+1];
   uint8_t out_frame[MAX_FRAME_SIZE+1];
+  bool gps_time_sync_needed = true;
 
   struct Frame {
     uint8_t len;
@@ -741,6 +742,11 @@ public:
       if (nmea.isValid()) {
         _prefs.node_lat = ((double)nmea.getLatitude())/1000000.;
         _prefs.node_lon = ((double)nmea.getLongitude())/1000000.;
+        if (gps_time_sync_needed) {
+          DateTime dt(nmea.getYear(), nmea.getMonth(),nmea.getDay(),nmea.getHour(),nmea.getMinute(),nmea.getSecond());
+          getRTCClock()->setCurrentTime(dt.unixtime());
+          gps_time_sync_needed = false;
+        }
       }
       next_gps_update = futureMillis(5000);
     } 
