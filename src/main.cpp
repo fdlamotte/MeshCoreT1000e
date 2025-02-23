@@ -17,6 +17,8 @@
 #include <helpers/BaseSerialInterface.h>
 #include <RTClib.h>
 
+#include "gps.h"
+
 /* ---------------------------------- CONFIGURATION ------------------------------------- */
 
 #ifndef LORA_FREQ
@@ -160,6 +162,7 @@ class MyMesh : public BaseChatMesh {
   bool  _iter_started;
   uint8_t cmd_frame[MAX_FRAME_SIZE+1];
   uint8_t out_frame[MAX_FRAME_SIZE+1];
+  bool gps_time_sync_needed = true;
 
   struct Frame {
     uint8_t len;
@@ -713,6 +716,7 @@ public:
 
   void loop() {
     BaseChatMesh::loop();
+    static long next_gps_update = 0;
     size_t len = _serial->checkRecvFrame(cmd_frame);
     if (len > 0) {
       handleCmdFrame(len);
@@ -734,6 +738,18 @@ public:
         _iter_started = false;
       }
     }
+    if (millisHasNowPassed(next_gps_update)) {
+      if (nmea.isValid()) {
+        _prefs.node_lat = ((double)nmea.getLatitude())/1000000.;
+        _prefs.node_lon = ((double)nmea.getLongitude())/1000000.;
+        if (gps_time_sync_needed) {
+          DateTime dt(nmea.getYear(), nmea.getMonth(),nmea.getDay(),nmea.getHour(),nmea.getMinute(),nmea.getSecond());
+          getRTCClock()->setCurrentTime(dt.unixtime());
+          gps_time_sync_needed = false;
+        }
+      }
+      next_gps_update = futureMillis(5000);
+    } 
   }
 };
 
@@ -838,8 +854,22 @@ void setup() {
 #else
   #error "need to define filesystem"
 #endif
+
+  // GPS Setup
+  digitalWrite(PIN_GPS_EN, GPS_EN_ACTIVE);
+  gps_setup();
 }
 
 void loop() {
+  gps_feed_nmea();
+
+  static int nextCheck = 0;
+  if (the_mesh.millisHasNowPassed(nextCheck)) {
+
+    gps_loop();
+
+    nextCheck = the_mesh.futureMillis(5000);
+  }
+
   the_mesh.loop();
 }
