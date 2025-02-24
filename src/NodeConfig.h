@@ -27,8 +27,6 @@
   #define OFFLINE_QUEUE_SIZE  16
 #endif
 
-#include <helpers/BaseChatMesh.h>
-
 #define SEND_TIMEOUT_BASE_MILLIS          500
 #define FLOOD_SEND_TIMEOUT_FACTOR         16.0f
 #define DIRECT_SEND_PERHOP_FACTOR         6.0f
