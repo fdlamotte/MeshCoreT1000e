@@ -1,5 +1,29 @@
-#include <BaseCompanionRadioMesh.h>
+#include <Arduino.h>
+#include <bluefruit.h>
 #include "gps.h"
+
+#ifndef LORA_FREQ
+  #define LORA_FREQ   915.0
+#endif
+#ifndef LORA_BW
+  #define LORA_BW     250
+#endif
+#ifndef LORA_SF
+  #define LORA_SF     10
+#endif
+#ifndef LORA_CR
+  #define LORA_CR      5
+#endif
+#ifndef LORA_TX_POWER
+  #define LORA_TX_POWER  20
+#endif
+#ifndef MAX_LORA_TX_POWER
+  #define MAX_LORA_TX_POWER  LORA_TX_POWER
+#endif
+
+#define  PUBLIC_GROUP_PSK  "izOH6cXN6mrJ5e26oRXNcg=="
+
+#include <BaseCompanionRadioMesh.h>
 
 // Believe it or not, this std C function is busted on some platforms!
 static uint32_t _atoi(const char* sp) {
@@ -11,34 +35,15 @@ static uint32_t _atoi(const char* sp) {
   return n;
 }
 
-#ifdef ESP32
-  #ifdef BLE_PIN_CODE
-    #include <helpers/esp32/SerialBLEInterface.h>
-    SerialBLEInterface serial_interface;
-  #else
-    #include <helpers/ArduinoSerialInterface.h>
-    ArduinoSerialInterface serial_interface;
-  #endif
-#elif defined(NRF52_PLATFORM)
-  #ifdef BLE_PIN_CODE
-    #include <helpers/nrf52/SerialBLEInterface.h>
-    SerialBLEInterface serial_interface;
-  #else
-    #include <helpers/ArduinoSerialInterface.h>
-    ArduinoSerialInterface serial_interface;
-  #endif
+#ifdef BLE_PIN_CODE
+  #include <helpers/nrf52/SerialBLEInterface.h>
+  SerialBLEInterface serial_interface;
 #else
-  #error "need to define a serial interface"
+  #include <helpers/ArduinoSerialInterface.h>
+  ArduinoSerialInterface serial_interface;
 #endif
 
-#if defined(NRF52_PLATFORM)
 RADIO_CLASS radio = new Module(P_LORA_NSS, P_LORA_DIO_1, P_LORA_RESET, P_LORA_BUSY, SPI);
-#elif defined(P_LORA_SCLK)
-SPIClass spi;
-RADIO_CLASS radio = new Module(P_LORA_NSS, P_LORA_DIO_1, P_LORA_RESET, P_LORA_BUSY, spi);
-#else
-RADIO_CLASS radio = new Module(P_LORA_NSS, P_LORA_DIO_1, P_LORA_RESET, P_LORA_BUSY);
-#endif
 StdRNG fast_rng;
 SimpleMeshTables tables;
 
@@ -48,7 +53,7 @@ class T1000eMesh : public BaseCompanionRadioMesh {
 
 public:
   T1000eMesh(RADIO_CLASS& phy, RadioLibWrapper& rw, mesh::RNG& rng, mesh::RTCClock& rtc, SimpleMeshTables& tables, MicroNMEA& nmea)
-     : BaseCompanionRadioMesh(phy, rw, rng, rtc, tables), _nmea(&nmea) {
+     : BaseCompanionRadioMesh(phy, rw, rng, rtc, tables, board, PUBLIC_GROUP_PSK, LORA_FREQ, LORA_SF, LORA_BW, LORA_CR, LORA_TX_POWER), _nmea(&nmea) {
   
      }
 
@@ -82,11 +87,7 @@ void setup() {
   Serial.begin(115200);
   board.begin();
 
-#ifdef SX126X_DIO3_TCXO_VOLTAGE
-  float tcxo = SX126X_DIO3_TCXO_VOLTAGE;
-#else
   float tcxo = 1.6f;
-#endif
 
   SPI.setPins(P_LORA_MISO, P_LORA_SCLK, P_LORA_MOSI);
   SPI.begin();

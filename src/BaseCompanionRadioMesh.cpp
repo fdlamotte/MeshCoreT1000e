@@ -348,7 +348,7 @@ void BaseCompanionRadioMesh::begin(FILESYSTEM& fs, mesh::RNG& trng) {
   _fs->mkdir("/bl");
 
   loadContacts();
-  _public = addChannel(PUBLIC_GROUP_PSK); // pre-configure Andy's public channel
+  _public = addChannel(_psk); // pre-configure Andy's public channel
 
   _phy->setFrequency(_prefs.freq);
   _phy->setSpreadingFactor(_prefs.sf);
@@ -386,7 +386,7 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
     memset(&out_frame[i], 0, 12);
     strcpy((char *) &out_frame[i], FIRMWARE_BUILD_DATE);
     i += 12;
-    const char* name = board.getManufacturerName();
+    const char* name = _board->getManufacturerName();
     int tlen = strlen(name);
     memcpy(&out_frame[i], name, tlen); i += tlen;
     _serial->writeFrame(out_frame, i);
@@ -665,11 +665,11 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
     savePrefs();
     writeOKFrame();
   } else if (cmd_frame[0] == CMD_REBOOT && memcmp(&cmd_frame[1], "reboot", 6) == 0) {
-    board.reboot();
+    _board->reboot();
   } else if (cmd_frame[0] == CMD_GET_BATTERY_VOLTAGE) {
     uint8_t reply[3];
     reply[0] = RESP_CODE_BATTERY_VOLTAGE;
-    uint16_t battery_millivolts = board.getBattMilliVolts();
+    uint16_t battery_millivolts = _board->getBattMilliVolts();
     memcpy(&reply[1], &battery_millivolts, 2);
     _serial->writeFrame(reply, 3);
   } else if (cmd_frame[0] == CMD_EXPORT_PRIVATE_KEY) {

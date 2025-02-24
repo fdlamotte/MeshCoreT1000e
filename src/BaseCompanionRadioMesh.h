@@ -18,9 +18,53 @@
 #include <helpers/BaseSerialInterface.h>
 #include <RTClib.h>
 
-#include "NodeConfig.h"
+#if defined(HELTEC_LORA_V3)
+  #include <helpers/HeltecV3Board.h>
+  #include <helpers/CustomSX1262Wrapper.h>
+  static HeltecV3Board board;
+#elif defined(HELTEC_LORA_V2)
+  #include <helpers/HeltecV2Board.h>
+  #include <helpers/CustomSX1276Wrapper.h>
+  static HeltecV2Board board;
+#elif defined(ARDUINO_XIAO_ESP32C3)
+  #include <helpers/XiaoC3Board.h>
+  #include <helpers/CustomSX1262Wrapper.h>
+  #include <helpers/CustomSX1268Wrapper.h>
+  static XiaoC3Board board;
+#elif defined(SEEED_XIAO_S3) || defined(LILYGO_T3S3)
+  #include <helpers/ESP32Board.h>
+  #include <helpers/CustomSX1262Wrapper.h>
+  static ESP32Board board;
+#elif defined(RAK_4631)
+  #include <helpers/nrf52/RAK4631Board.h>
+  #include <helpers/CustomSX1262Wrapper.h>
+  static RAK4631Board board;
+#elif defined(T1000_E)
+  #include <helpers/nrf52/T1000eBoard.h>
+  #include <helpers/CustomLR1110Wrapper.h>
+  static T1000eBoard board;
+#else
+  #error "need to provide a 'board' object"
+#endif
+
 #include <helpers/BaseChatMesh.h>
 
+#ifndef MAX_CONTACTS
+  #define MAX_CONTACTS         100
+#endif
+
+#ifndef OFFLINE_QUEUE_SIZE
+  #define OFFLINE_QUEUE_SIZE  16
+#endif
+
+#define SEND_TIMEOUT_BASE_MILLIS          500
+#define FLOOD_SEND_TIMEOUT_FACTOR         16.0f
+#define DIRECT_SEND_PERHOP_FACTOR         6.0f
+#define DIRECT_SEND_PERHOP_EXTRA_MILLIS   250
+
+#ifndef MAX_LORA_TX_POWER
+  #define MAX_LORA_TX_POWER  20
+#endif
 /*------------ Frame Protocol --------------*/
 
 #define FIRMWARE_VER_CODE    1
@@ -115,6 +159,7 @@ class BaseCompanionRadioMesh : public BaseChatMesh {
   uint8_t app_target_ver;
   uint8_t cmd_frame[MAX_FRAME_SIZE+1];
   uint8_t out_frame[MAX_FRAME_SIZE+1];
+  const char * _psk;
 
   struct Frame {
     uint8_t len;
@@ -151,6 +196,7 @@ class BaseCompanionRadioMesh : public BaseChatMesh {
 
 protected:
   NodePrefs _prefs;
+  mesh::MainBoard* _board;
 
   float getAirtimeBudgetFactor() const override {
     return _prefs.airtime_factor;
@@ -180,8 +226,8 @@ protected:
 
 public:
 
-  BaseCompanionRadioMesh(RADIO_CLASS& phy, RadioLibWrapper& rw, mesh::RNG& rng, mesh::RTCClock& rtc, SimpleMeshTables& tables)
-     : BaseChatMesh(rw, *new ArduinoMillis(), rng, rtc, *new StaticPoolPacketManager(16), tables), _serial(NULL), _phy(&phy)
+  BaseCompanionRadioMesh(RADIO_CLASS& phy, RadioLibWrapper& rw, mesh::RNG& rng, mesh::RTCClock& rtc, SimpleMeshTables& tables, mesh::MainBoard& board, const char* psk, float freq, uint8_t sf, float bw, uint8_t cr, uint8_t tx_power)
+     : BaseChatMesh(rw, *new ArduinoMillis(), rng, rtc, *new StaticPoolPacketManager(16), tables), _serial(NULL), _phy(&phy), _board(&board), _psk(psk)
   {
     _iter_started = false;
     offline_queue_len = 0;
@@ -193,11 +239,11 @@ public:
     memset(&_prefs, 0, sizeof(_prefs));
     _prefs.airtime_factor = 1.0;    // one half
     strcpy(_prefs.node_name, "NONAME");
-    _prefs.freq = LORA_FREQ;
-    _prefs.sf = LORA_SF;
-    _prefs.bw = LORA_BW;
-    _prefs.cr = LORA_CR;
-    _prefs.tx_power_dbm = LORA_TX_POWER;
+    _prefs.freq = freq;
+    _prefs.sf = sf;
+    _prefs.bw = bw;
+    _prefs.cr = cr;
+    _prefs.tx_power_dbm = tx_power;
     //_prefs.rx_delay_base = 10.0f;  enable once new algo fixed
   }
 
