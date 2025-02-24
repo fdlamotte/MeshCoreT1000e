@@ -126,6 +126,8 @@ static uint32_t _atoi(const char* sp) {
 #define CMD_EXPORT_PRIVATE_KEY    23
 #define CMD_IMPORT_PRIVATE_KEY    24
 #define CMD_SEND_RAW_DATA         25
+#define CMD_SEND_LOGIN            26
+#define CMD_SEND_STATUS_REQ       27
 
 #define RESP_CODE_OK                0
 #define RESP_CODE_ERR               1
@@ -150,6 +152,9 @@ static uint32_t _atoi(const char* sp) {
 #define PUSH_CODE_SEND_CONFIRMED    0x82
 #define PUSH_CODE_MSG_WAITING       0x83
 #define PUSH_CODE_RAW_DATA          0x84
+#define PUSH_CODE_LOGIN_SUCCESS     0x85
+#define PUSH_CODE_LOGIN_FAIL        0x86
+#define PUSH_CODE_STATUS_RESPONSE   0x87
 
 /* -------------------------------------------------------------------------------------- */
 
@@ -174,6 +179,8 @@ class MyMesh : public BaseChatMesh {
   IdentityStore* _identity_store;
   NodePrefs _prefs;
   uint32_t expected_ack_crc;  // TODO: keep table of expected ACKs
+  uint32_t pending_login;
+  uint32_t pending_status;
   mesh::GroupChannel* _public;
   BaseSerialInterface* _serial;
   unsigned long last_msg_sent;
@@ -481,8 +488,38 @@ protected:
   }
 
   void onContactResponse(const ContactInfo& contact, const uint8_t* data, uint8_t len) override {
-    // TODO: check for login response
-    // TODO: check for Get Stats response
+    uint32_t sender_timestamp;
+    memcpy(&sender_timestamp, data, 4);
+
+    if (pending_login && memcmp(&pending_login, contact.id.pub_key, 4) == 0) { // check for login response
+      // yes, is response to pending sendLogin()
+      pending_login = 0;
+
+      int i = 0;
+      if (memcmp(&data[4], "OK", 2) == 0) {    // legacy Repeater login OK response
+        out_frame[i++] = PUSH_CODE_LOGIN_SUCCESS;
+        out_frame[i++] = 0;  // legacy: is_admin = false
+      } else if (data[4] == RESP_SERVER_LOGIN_OK) {   // new login response
+        //  keep_alive_interval  = data[5] * 16
+        out_frame[i++] = PUSH_CODE_LOGIN_SUCCESS;
+        out_frame[i++] = data[6];  // permissions (eg. is_admin)
+      } else {
+        out_frame[i++] = PUSH_CODE_LOGIN_FAIL;
+        out_frame[i++] = 0;  // reserved
+      }
+      memcpy(&out_frame[i], contact.id.pub_key, 6); i += 6;  // pub_key_prefix
+      _serial->writeFrame(out_frame, i);
+    } else if (len > 4 && pending_status && memcmp(&pending_status, contact.id.pub_key, 4) == 0) { // check for status response
+      // yes, is response to pending sendStatusRequest()
+      pending_status = 0;
+
+      int i = 0;
+      out_frame[i++] = PUSH_CODE_STATUS_RESPONSE;
+      out_frame[i++] = 0;  // reserved
+      memcpy(&out_frame[i], contact.id.pub_key, 6); i += 6;  // pub_key_prefix
+      memcpy(&out_frame[i], &data[4], len - 4); i += (len - 4);
+      _serial->writeFrame(out_frame, i);
+    }
   }
 
   void onRawDataRecv(mesh::Packet* packet) override {
@@ -520,6 +557,7 @@ public:
     offline_queue_len = 0;
     app_target_ver = 0;
     _identity_store = NULL;
+    pending_login = pending_status = 0;
 
     // defaults
     memset(&_prefs, 0, sizeof(_prefs));
@@ -921,6 +959,48 @@ public:
         }
       } else {
         writeErrFrame();  // flood, not supported (yet)
+      }
+    } else if (cmd_frame[0] == CMD_SEND_LOGIN && len >= 1+PUB_KEY_SIZE) {
+      uint8_t* pub_key = &cmd_frame[1];
+      ContactInfo* recipient = lookupContactByPubKey(pub_key, PUB_KEY_SIZE);
+      char *password = (char *) &cmd_frame[1+PUB_KEY_SIZE];
+      cmd_frame[len] = 0;  // ensure null terminator in password
+      if (recipient) {
+        uint32_t est_timeout;
+        int result = sendLogin(*recipient, password, est_timeout);
+        if (result == MSG_SEND_FAILED) {
+          writeErrFrame();
+        } else {
+          pending_status = 0;
+          memcpy(&pending_login, recipient->id.pub_key, 4);  // match this to onContactResponse()
+          out_frame[0] = RESP_CODE_SENT;
+          out_frame[1] = (result == MSG_SEND_SENT_FLOOD) ? 1 : 0;
+          memcpy(&out_frame[2], &pending_login, 4);
+          memcpy(&out_frame[6], &est_timeout, 4);
+          _serial->writeFrame(out_frame, 10);
+        }
+      } else {
+        writeErrFrame();  // contact not found
+      }
+    } else if (cmd_frame[0] == CMD_SEND_STATUS_REQ && len >= 1+PUB_KEY_SIZE) {
+      uint8_t* pub_key = &cmd_frame[1];
+      ContactInfo* recipient = lookupContactByPubKey(pub_key, PUB_KEY_SIZE);
+      if (recipient) {
+        uint32_t est_timeout;
+        int result = sendStatusRequest(*recipient, est_timeout);
+        if (result == MSG_SEND_FAILED) {
+          writeErrFrame();
+        } else {
+          pending_login = 0;
+          memcpy(&pending_status, recipient->id.pub_key, 4);  // match this to onContactResponse()
+          out_frame[0] = RESP_CODE_SENT;
+          out_frame[1] = (result == MSG_SEND_SENT_FLOOD) ? 1 : 0;
+          memcpy(&out_frame[2], &pending_status, 4);
+          memcpy(&out_frame[6], &est_timeout, 4);
+          _serial->writeFrame(out_frame, 10);
+        }
+      } else {
+        writeErrFrame();  // contact not found
       }
     } else {
       writeErrFrame();
