@@ -1,5 +1,3 @@
-#include <Arduino.h>   // needed for PlatformIO
-
 #include <BaseCompanionRadioMesh.h>
 
 void BaseCompanionRadioMesh::loadContacts() {
