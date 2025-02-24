@@ -11,7 +11,6 @@ static uint32_t _atoi(const char* sp) {
   return n;
 }
 
-
 #ifdef ESP32
   #ifdef BLE_PIN_CODE
     #include <helpers/esp32/SerialBLEInterface.h>
@@ -42,7 +41,37 @@ RADIO_CLASS radio = new Module(P_LORA_NSS, P_LORA_DIO_1, P_LORA_RESET, P_LORA_BU
 #endif
 StdRNG fast_rng;
 SimpleMeshTables tables;
-BaseCompanionRadioMesh the_mesh(radio, *new WRAPPER_CLASS(radio, board), fast_rng, *new VolatileRTCClock(), tables);
+
+class T1000eMesh : public BaseCompanionRadioMesh {
+  bool gps_time_sync_needed = true;
+  MicroNMEA* _nmea;
+
+public:
+  T1000eMesh(RADIO_CLASS& phy, RadioLibWrapper& rw, mesh::RNG& rng, mesh::RTCClock& rtc, SimpleMeshTables& tables, MicroNMEA& nmea)
+     : BaseCompanionRadioMesh(phy, rw, rng, rtc, tables), _nmea(&nmea) {
+  
+     }
+
+  void loop() {
+    BaseCompanionRadioMesh::loop();
+    static long next_gps_update = 0;
+    if (millisHasNowPassed(next_gps_update)) {
+      if (_nmea->isValid()) {
+        _prefs.node_lat = ((double)_nmea->getLatitude())/1000000.;
+        _prefs.node_lon = ((double)_nmea->getLongitude())/1000000.;
+        if (gps_time_sync_needed) {
+          DateTime dt(_nmea->getYear(), _nmea->getMonth(),_nmea->getDay(),_nmea->getHour(),_nmea->getMinute(),_nmea->getSecond());
+          getRTCClock()->setCurrentTime(dt.unixtime());
+          gps_time_sync_needed = false;
+        }
+      }
+      next_gps_update = futureMillis(5000);
+    } 
+  }
+};
+
+T1000eMesh the_mesh(radio, *new WRAPPER_CLASS(radio, board), fast_rng, *new VolatileRTCClock(), tables, nmea);
+
 
 void halt() {
   while (1) ;
@@ -51,7 +80,6 @@ void halt() {
 void setup() {
 
   Serial.begin(115200);
-
   board.begin();
 
 #ifdef SX126X_DIO3_TCXO_VOLTAGE
@@ -93,9 +121,7 @@ void loop() {
 
   static int nextCheck = 0;
   if (the_mesh.millisHasNowPassed(nextCheck)) {
-
     gps_loop();
-
     nextCheck = the_mesh.futureMillis(5000);
   }
 

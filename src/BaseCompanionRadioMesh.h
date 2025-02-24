@@ -102,7 +102,6 @@ class BaseCompanionRadioMesh : public BaseChatMesh {
   FILESYSTEM* _fs;
   RADIO_CLASS* _phy;
   IdentityStore* _identity_store;
-  NodePrefs _prefs;
   uint32_t expected_ack_crc;  // TODO: keep table of expected ACKs
   uint32_t pending_login;
   uint32_t pending_status;
@@ -151,6 +150,8 @@ class BaseCompanionRadioMesh : public BaseChatMesh {
   void soundBuzzer();
 
 protected:
+  NodePrefs _prefs;
+
   float getAirtimeBudgetFactor() const override {
     return _prefs.airtime_factor;
   }
