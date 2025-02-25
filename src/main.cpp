@@ -139,8 +139,12 @@ void buttonHandler() {
         digitalWrite(LED_PIN, LOW);
 
         Serial.print("Powering off");
+#ifdef HAS_T1000e_POWEROFF
         delay(10);
         board.powerOff();
+#else
+       Serial.print("Not really, needs to update MC repo first ;)");
+#endif
       }
     }
 
