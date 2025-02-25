@@ -23,7 +23,7 @@
 
 #define  PUBLIC_GROUP_PSK  "izOH6cXN6mrJ5e26oRXNcg=="
 
-#include <BaseCompanionRadioMesh.h>
+#include <helpers/BaseCompanionRadioMesh.h>
 
 // Believe it or not, this std C function is busted on some platforms!
 static uint32_t _atoi(const char* sp) {

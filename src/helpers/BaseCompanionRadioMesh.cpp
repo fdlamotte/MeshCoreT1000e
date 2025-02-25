@@ -1,4 +1,4 @@
-#include <BaseCompanionRadioMesh.h>
+#include <helpers/BaseCompanionRadioMesh.h>
 
 void BaseCompanionRadioMesh::loadContacts() {
   if (_fs->exists("/contacts3")) {
