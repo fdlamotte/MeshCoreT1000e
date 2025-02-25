@@ -117,6 +117,9 @@ void setup() {
 
   the_mesh.startInterface(serial_interface);
 
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, HIGH);
+
   // GPS Setup
   digitalWrite(PIN_GPS_EN, GPS_EN_ACTIVE);
   gps_setup();
@@ -131,13 +134,9 @@ void buttonHandler() {
   if (the_mesh.millisHasNowPassed(nextBtnCheck)) {
     int btnState = digitalRead(BUTTON_PIN);
     bool btnChanged = (btnState != lastBtnState);
-    if (btnChanged) {
-      Serial.println(cyclesSinceBtnChange);
-    }
-
     if (btnChanged && (btnState == LOW)) {
       if (cyclesSinceBtnChange > 8) { // 4 sec
-        digitalWrite(LED_BUILTIN, HIGH);
+        digitalWrite(LED_PIN, LOW);
 
         Serial.print("Powering off");
         delay(10);
