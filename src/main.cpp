@@ -122,6 +122,39 @@ void setup() {
   gps_setup();
 }
 
+void buttonHandler() {
+  static int nextBtnCheck = 0;
+  static int lastBtnState = 0;
+  static int btnPressNumber = 0;
+  static int cyclesSinceBtnChange = 0;
+
+  if (the_mesh.millisHasNowPassed(nextBtnCheck)) {
+    int btnState = digitalRead(BUTTON_PIN);
+    bool btnChanged = (btnState != lastBtnState);
+    if (btnChanged) {
+      Serial.println(cyclesSinceBtnChange);
+    }
+
+    if (btnChanged && (btnState == LOW)) {
+      if (cyclesSinceBtnChange > 8) { // 4 sec
+        digitalWrite(LED_BUILTIN, HIGH);
+
+        Serial.print("Powering off");
+        delay(10);
+        board.powerOff();
+      }
+    }
+
+    if (btnChanged) 
+      cyclesSinceBtnChange = 0;
+    else
+      cyclesSinceBtnChange++;
+
+    lastBtnState = btnState;
+    nextBtnCheck = the_mesh.futureMillis(500);  
+  }
+}
+
 void loop() {
   gps_feed_nmea();
 
@@ -130,6 +163,8 @@ void loop() {
     gps_loop();
     nextCheck = the_mesh.futureMillis(5000);
   }
+
+  buttonHandler();
 
   the_mesh.loop();
 }
