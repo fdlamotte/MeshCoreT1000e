@@ -121,7 +121,7 @@ void setup() {
   digitalWrite(LED_PIN, HIGH);
 
   // GPS Setup
-  digitalWrite(PIN_GPS_EN, GPS_EN_ACTIVE);
+  digitalWrite(GPS_EN, HIGH);
   gps_setup();
 }
 

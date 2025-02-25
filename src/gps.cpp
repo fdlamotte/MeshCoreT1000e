@@ -35,9 +35,9 @@ void gpsHardwareReset()
 	while (gps.available())
 		gps.read();
 
-	digitalWrite(PIN_GPS_RESET, HIGH);
+	digitalWrite(GPS_RESET, HIGH);
 	delay(50);
-	digitalWrite(PIN_GPS_RESET, LOW);
+	digitalWrite(GPS_RESET, LOW);
 
 	// Reset is complete when the first valid message is received
 	while (1) {
