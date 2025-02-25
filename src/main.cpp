@@ -2,6 +2,9 @@
 #include <bluefruit.h>
 #include "gps.h"
 
+#include <helpers/nrf52/T1000eBoard.h>
+#include <helpers/CustomLR1110Wrapper.h>
+
 #ifndef LORA_FREQ
   #define LORA_FREQ   915.0
 #endif
@@ -42,6 +45,8 @@ static uint32_t _atoi(const char* sp) {
   #include <helpers/ArduinoSerialInterface.h>
   ArduinoSerialInterface serial_interface;
 #endif
+
+static T1000eBoard board;
 
 RADIO_CLASS radio = new Module(P_LORA_NSS, P_LORA_DIO_1, P_LORA_RESET, P_LORA_BUSY, SPI);
 StdRNG fast_rng;
