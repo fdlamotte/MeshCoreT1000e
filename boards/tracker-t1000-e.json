@@ -1,11 +1,11 @@
 {
   "build": {
     "arduino": {
-      "ldscript": "nrf52840_s140_v6.ld"
+      "ldscript": "nrf52840_s140_v7.ld"
     },
     "core": "nRF5",
     "cpu": "cortex-m4",
-    "extra_flags": "-DNRF52840_XXAA",
+    "extra_flags": "-DARDUINO_WIO_WM1110 -DNRF52840_XXAA",
     "f_cpu": "64000000L",
     "hwids": [
       ["0x239A", "0x8029"],
