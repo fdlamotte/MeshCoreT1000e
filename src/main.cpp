@@ -21,7 +21,7 @@
   #define LORA_TX_POWER  20
 #endif
 #ifndef MAX_LORA_TX_POWER
-  #define MAX_LORA_TX_POWER  LORA_TX_POWER
+  #define MAX_LORA_TX_POWER  30
 #endif
 
 #define  PUBLIC_GROUP_PSK  "izOH6cXN6mrJ5e26oRXNcg=="
