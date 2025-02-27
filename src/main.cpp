@@ -2,6 +2,11 @@
 #include <bluefruit.h>
 #include "gps.h"
 
+#define _PWM_LOGLEVEL_       4
+
+#define USING_TIMER false
+#include "nRF52_PWM.h"
+
 #include <helpers/nrf52/T1000eBoard.h>
 #include <helpers/CustomLR1110Wrapper.h>
 
@@ -55,12 +60,50 @@ SimpleMeshTables tables;
 class T1000eMesh : public BaseCompanionRadioMesh {
   bool gps_time_sync_needed = true;
   MicroNMEA* _nmea;
+  nRF52_PWM _pwm;
 
 public:
   T1000eMesh(RADIO_CLASS& phy, RadioLibWrapper& rw, mesh::RNG& rng, mesh::RTCClock& rtc, SimpleMeshTables& tables, MicroNMEA& nmea)
-     : BaseCompanionRadioMesh(phy, rw, rng, rtc, tables, board, PUBLIC_GROUP_PSK, LORA_FREQ, LORA_SF, LORA_BW, LORA_CR, LORA_TX_POWER), _nmea(&nmea) {
-  
+     : BaseCompanionRadioMesh(phy, rw, rng, rtc, tables, board, PUBLIC_GROUP_PSK, LORA_FREQ, LORA_SF, LORA_BW, LORA_CR, LORA_TX_POWER), 
+     _nmea(&nmea), _pwm(nRF52_PWM(LED_PIN, 1000.0f, 100.0f)) {
+
      }
+
+  void ledHandler() {
+    static bool up;
+    static int cycles;
+    bool gps_fix = _nmea->isValid();
+    bool has_msg = getUnreadMsgNb() > 0;
+
+    static int val;
+    val = (val + 5)%100;
+
+    _pwm.setPWM(LED_PIN, 1000, val);
+
+  }
+
+  void buttonHandler() {
+    static int lastBtnState = 0;
+    static int btnPressNumber = 0;
+    static int cyclesSinceBtnChange = 0;
+
+    int btnState = digitalRead(BUTTON_PIN);
+    bool btnChanged = (btnState != lastBtnState);
+    if (btnChanged && (btnState == LOW)) {
+      if (cyclesSinceBtnChange > 8) { // 4 sec
+        _pwm.setPWM(LED_PIN, 0, 0);
+        delay(10);
+        board.powerOff();
+      }
+    }
+
+    if (btnChanged) 
+      cyclesSinceBtnChange = 0;
+    else
+      cyclesSinceBtnChange++;
+
+    lastBtnState = btnState;    
+  }
 
   void loop() {
     BaseCompanionRadioMesh::loop();
@@ -76,7 +119,21 @@ public:
         }
       }
       next_gps_update = futureMillis(5000);
-    } 
+    }
+
+    static int nextBtnCheck = 0;
+    if (millisHasNowPassed(nextBtnCheck)) {
+      buttonHandler();
+      nextBtnCheck = futureMillis(500);  
+    }
+
+    static long next_led_update = 0;
+    if (millisHasNowPassed(next_led_update)) {
+      ledHandler();
+      next_led_update = futureMillis(500);
+    }
+
+
   }
 };
 
@@ -117,45 +174,12 @@ void setup() {
 
   the_mesh.startInterface(serial_interface);
 
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, HIGH);
+  // pinMode(LED_PIN, OUTPUT);
+  // digitalWrite(LED_PIN, HIGH);
 
   // GPS Setup
   digitalWrite(GPS_EN, HIGH);
   gps_setup();
-}
-
-void buttonHandler() {
-  static int nextBtnCheck = 0;
-  static int lastBtnState = 0;
-  static int btnPressNumber = 0;
-  static int cyclesSinceBtnChange = 0;
-
-  if (the_mesh.millisHasNowPassed(nextBtnCheck)) {
-    int btnState = digitalRead(BUTTON_PIN);
-    bool btnChanged = (btnState != lastBtnState);
-    if (btnChanged && (btnState == LOW)) {
-      if (cyclesSinceBtnChange > 8) { // 4 sec
-        digitalWrite(LED_PIN, LOW);
-
-        Serial.print("Powering off");
-#ifdef HAS_T1000e_POWEROFF
-        delay(10);
-        board.powerOff();
-#else
-       Serial.print("Not really, needs to update MC repo first ;)");
-#endif
-      }
-    }
-
-    if (btnChanged) 
-      cyclesSinceBtnChange = 0;
-    else
-      cyclesSinceBtnChange++;
-
-    lastBtnState = btnState;
-    nextBtnCheck = the_mesh.futureMillis(500);  
-  }
 }
 
 void loop() {
@@ -167,7 +191,6 @@ void loop() {
     nextCheck = the_mesh.futureMillis(5000);
   }
 
-  buttonHandler();
 
   the_mesh.loop();
 }
