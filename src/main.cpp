@@ -75,11 +75,14 @@ public:
     bool gps_fix = _nmea->isValid();
     bool has_msg = getUnreadMsgNb() > 0;
 
-    static int val;
-    val = (val + 5)%100;
+    int gps_level = gps_fix ? 40 : 0;
+    int msg_level = has_msg ? 95 : 20;
 
-    _pwm.setPWM(LED_PIN, 1000, val);
-
+    if ((++cycles)%2 == 0) {
+      _pwm.setPWM(LED_PIN, 1000, gps_level);
+    } else {
+      _pwm.setPWM(LED_PIN, 1000, msg_level);
+    }
   }
 
   void buttonHandler() {
@@ -107,6 +110,7 @@ public:
 
   void loop() {
     BaseCompanionRadioMesh::loop();
+  
     static long next_gps_update = 0;
     if (millisHasNowPassed(next_gps_update)) {
       if (_nmea->isValid()) {
@@ -130,10 +134,8 @@ public:
     static long next_led_update = 0;
     if (millisHasNowPassed(next_led_update)) {
       ledHandler();
-      next_led_update = futureMillis(500);
+      next_led_update = futureMillis(2000);
     }
-
-
   }
 };
 
@@ -174,9 +176,6 @@ void setup() {
 
   the_mesh.startInterface(serial_interface);
 
-  // pinMode(LED_PIN, OUTPUT);
-  // digitalWrite(LED_PIN, HIGH);
-
   // GPS Setup
   digitalWrite(GPS_EN, HIGH);
   gps_setup();
@@ -190,7 +189,6 @@ void loop() {
     gps_loop();
     nextCheck = the_mesh.futureMillis(5000);
   }
-
 
   the_mesh.loop();
 }
