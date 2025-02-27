@@ -1,4 +1,5 @@
 #include <helpers/BaseCompanionRadioMesh.h>
+#include <string.h>
 
 void BaseCompanionRadioMesh::loadContacts() {
   if (_fs->exists("/contacts3")) {
@@ -220,51 +221,59 @@ bool BaseCompanionRadioMesh::processAck(const uint8_t *data) {
   return false;
 }
 
-void BaseCompanionRadioMesh::onMessageRecv(const ContactInfo& from, uint8_t path_len, uint32_t sender_timestamp, const char *text) {
-  int i = 0;
-  out_frame[i++] = RESP_CODE_CONTACT_MSG_RECV;
-  memcpy(&out_frame[i], from.id.pub_key, 6); i += 6;  // just 6-byte prefix
-  out_frame[i++] = path_len;
-  out_frame[i++] = TXT_TYPE_PLAIN;
-  memcpy(&out_frame[i], &sender_timestamp, 4); i += 4;
-  int tlen = strlen(text);   // TODO: UTF-8 ??
-  if (i + tlen > MAX_FRAME_SIZE) {
-    tlen = MAX_FRAME_SIZE - i;
-  }
-  memcpy(&out_frame[i], text, tlen); i += tlen;
-  addToOfflineQueue(out_frame, i);
+  void BaseCompanionRadioMesh::queueMessage(const ContactInfo& from, uint8_t txt_type, uint8_t path_len, uint32_t sender_timestamp, const char *text) {
+    int i = 0;
+    out_frame[i++] = RESP_CODE_CONTACT_MSG_RECV;
+    memcpy(&out_frame[i], from.id.pub_key, 6); i += 6;  // just 6-byte prefix
+    out_frame[i++] = path_len;
+    out_frame[i++] = txt_type;
+    memcpy(&out_frame[i], &sender_timestamp, 4); i += 4;
+    int tlen = strlen(text);   // TODO: UTF-8 ??
+    if (i + tlen > MAX_FRAME_SIZE) {
+      tlen = MAX_FRAME_SIZE - i;
+    }
+    memcpy(&out_frame[i], text, tlen); i += tlen;
+    addToOfflineQueue(out_frame, i);
 
-  if (_serial->isConnected()) {
-    uint8_t frame[1];
-    frame[0] = PUSH_CODE_MSG_WAITING;  // send push 'tickle'
-    _serial->writeFrame(frame, 1);
-  } else {
-    soundBuzzer();
+    if (_serial->isConnected()) {
+      uint8_t frame[1];
+      frame[0] = PUSH_CODE_MSG_WAITING;  // send push 'tickle'
+      _serial->writeFrame(frame, 1);
+    } else {
+      soundBuzzer();
+    }
   }
-}
 
-void BaseCompanionRadioMesh::onChannelMessageRecv(const mesh::GroupChannel& channel, int in_path_len, uint32_t timestamp, const char *text) {
-  int i = 0;
-  out_frame[i++] = RESP_CODE_CHANNEL_MSG_RECV;
-  out_frame[i++] = 0;  // FUTURE: channel_idx (will just be 'public' for now)
-  out_frame[i++] = in_path_len < 0 ? 0xFF : in_path_len;
-  out_frame[i++] = TXT_TYPE_PLAIN;
-  memcpy(&out_frame[i], &timestamp, 4); i += 4;
-  int tlen = strlen(text);   // TODO: UTF-8 ??
-  if (i + tlen > MAX_FRAME_SIZE) {
-    tlen = MAX_FRAME_SIZE - i;
+  void BaseCompanionRadioMesh::onMessageRecv(const ContactInfo& from, uint8_t path_len, uint32_t sender_timestamp, const char *text) {
+    queueMessage(from, TXT_TYPE_PLAIN, path_len, sender_timestamp, text);
   }
-  memcpy(&out_frame[i], text, tlen); i += tlen;
-  addToOfflineQueue(out_frame, i);
 
-  if (_serial->isConnected()) {
-    uint8_t frame[1];
-    frame[0] = PUSH_CODE_MSG_WAITING;  // send push 'tickle'
-    _serial->writeFrame(frame, 1);
-  } else {
-    soundBuzzer();
+  void BaseCompanionRadioMesh::onCommandDataRecv(const ContactInfo& from, uint8_t path_len, uint32_t sender_timestamp, const char *text) {
+    queueMessage(from, TXT_TYPE_CLI_DATA, path_len, sender_timestamp, text);
   }
-}
+
+  void BaseCompanionRadioMesh::onChannelMessageRecv(const mesh::GroupChannel& channel, int in_path_len, uint32_t timestamp, const char *text) {
+    int i = 0;
+    out_frame[i++] = RESP_CODE_CHANNEL_MSG_RECV;
+    out_frame[i++] = 0;  // FUTURE: channel_idx (will just be 'public' for now)
+    out_frame[i++] = in_path_len < 0 ? 0xFF : in_path_len;
+    out_frame[i++] = TXT_TYPE_PLAIN;
+    memcpy(&out_frame[i], &timestamp, 4); i += 4;
+    int tlen = strlen(text);   // TODO: UTF-8 ??
+    if (i + tlen > MAX_FRAME_SIZE) {
+      tlen = MAX_FRAME_SIZE - i;
+    }
+    memcpy(&out_frame[i], text, tlen); i += tlen;
+    addToOfflineQueue(out_frame, i);
+
+    if (_serial->isConnected()) {
+      uint8_t frame[1];
+      frame[0] = PUSH_CODE_MSG_WAITING;  // send push 'tickle'
+      _serial->writeFrame(frame, 1);
+    } else {
+      soundBuzzer();
+    }
+  }
 
 void BaseCompanionRadioMesh::onContactResponse(const ContactInfo& contact, const uint8_t* data, uint8_t len) {
   uint32_t sender_timestamp;
@@ -419,35 +428,41 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
     int tlen = strlen(_prefs.node_name);   // revisit: UTF_8 ??
     memcpy(&out_frame[i], _prefs.node_name, tlen); i += tlen;
     _serial->writeFrame(out_frame, i);
-  } else if (cmd_frame[0] == CMD_SEND_TXT_MSG && len >= 14) {
-    int i = 1;
-    uint8_t txt_type = cmd_frame[i++];
-    uint8_t attempt = cmd_frame[i++];
-    uint32_t msg_timestamp;
-    memcpy(&msg_timestamp, &cmd_frame[i], 4); i += 4;
-    uint8_t* pub_key_prefix = &cmd_frame[i]; i += 6;
-    ContactInfo* recipient = lookupContactByPubKey(pub_key_prefix, 6);
-    if (recipient && attempt < 4 && txt_type == TXT_TYPE_PLAIN) {
-      char *text = (char *) &cmd_frame[i];
-      int tlen = len - i;
-      uint32_t est_timeout;
-      text[tlen] = 0;  // ensure null
-      int result = sendMessage(*recipient, msg_timestamp, attempt, text, expected_ack_crc, est_timeout);
-      // TODO: add expected ACK to table
-      if (result == MSG_SEND_FAILED) {
-        writeErrFrame();
-      } else {
-        last_msg_sent = _ms->getMillis();
+    } else if (cmd_frame[0] == CMD_SEND_TXT_MSG && len >= 14) {
+      int i = 1;
+      uint8_t txt_type = cmd_frame[i++];
+      uint8_t attempt = cmd_frame[i++];
+      uint32_t msg_timestamp;
+      memcpy(&msg_timestamp, &cmd_frame[i], 4); i += 4;
+      uint8_t* pub_key_prefix = &cmd_frame[i]; i += 6;
+      ContactInfo* recipient = lookupContactByPubKey(pub_key_prefix, 6);
+      if (recipient && attempt < 4 && (txt_type == TXT_TYPE_PLAIN || txt_type == TXT_TYPE_CLI_DATA)) {
+        char *text = (char *) &cmd_frame[i];
+        int tlen = len - i;
+        uint32_t est_timeout;
+        text[tlen] = 0;  // ensure null
+        int result;
+        if (txt_type == TXT_TYPE_CLI_DATA) {
+          result = sendCommandData(*recipient, msg_timestamp, attempt, text, est_timeout);
+          expected_ack_crc = 0;  // no Ack expected
+        } else {
+          result = sendMessage(*recipient, msg_timestamp, attempt, text, expected_ack_crc, est_timeout);
+        }
+        // TODO: add expected ACK to table
+        if (result == MSG_SEND_FAILED) {
+          writeErrFrame();
+        } else {
+          last_msg_sent = _ms->getMillis();
 
-        out_frame[0] = RESP_CODE_SENT;
-        out_frame[1] = (result == MSG_SEND_SENT_FLOOD) ? 1 : 0;
-        memcpy(&out_frame[2], &expected_ack_crc, 4);
-        memcpy(&out_frame[6], &est_timeout, 4);
-        _serial->writeFrame(out_frame, 10);
+          out_frame[0] = RESP_CODE_SENT;
+          out_frame[1] = (result == MSG_SEND_SENT_FLOOD) ? 1 : 0;
+          memcpy(&out_frame[2], &expected_ack_crc, 4);
+          memcpy(&out_frame[6], &est_timeout, 4);
+          _serial->writeFrame(out_frame, 10);
+        }
+      } else {
+        writeErrFrame(); // unknown recipient, or unsuported TXT_TYPE_*
       }
-    } else {
-      writeErrFrame(); // unknown recipient, or unsuported TXT_TYPE_*
-    }
   } else if (cmd_frame[0] == CMD_SEND_CHANNEL_TXT_MSG) {  // send GroupChannel msg
     int i = 1;
     uint8_t txt_type = cmd_frame[i++];  // should be TXT_TYPE_PLAIN
@@ -613,6 +628,7 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
     int out_len;
     if ((out_len = getFromOfflineQueue(out_frame)) > 0) {
       _serial->writeFrame(out_frame, out_len);
+      onNextMsgSync();
     } else {
       out_frame[0] = RESP_CODE_NO_MORE_MESSAGES;
       _serial->writeFrame(out_frame, 1);
