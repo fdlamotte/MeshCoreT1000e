@@ -70,18 +70,28 @@ public:
      }
 
   void ledHandler() {
-    static bool up;
-    static int cycles;
-    bool gps_fix = _nmea->isValid();
-    bool has_msg = getUnreadMsgNb() > 0;
+    static long next_led_update = 0;
+    if (millisHasNowPassed(next_led_update)) {
+      static bool up;
+      static int cycles;
+      bool gps_fix = _nmea->isValid();
+      bool has_msg = getUnreadMsgNb() > 0;
+      int pwm_level;
 
-    int gps_level = gps_fix ? 40 : 0;
-    int msg_level = has_msg ? 95 : 20;
+      if ((++cycles)%2 == 0) {
+        pwm_level = gps_fix ? 40 : 0;
+        next_led_update = futureMillis(2000);
+      } else {
+        if (has_msg) {
+          pwm_level = 95;
+          next_led_update = futureMillis(500);
+        } else {
+          pwm_level = 30;
+          next_led_update = futureMillis(2000);
+        }
+      }
+      _pwm.setPWM(LED_PIN, 1000, pwm_level);
 
-    if ((++cycles)%2 == 0) {
-      _pwm.setPWM(LED_PIN, 1000, gps_level);
-    } else {
-      _pwm.setPWM(LED_PIN, 1000, msg_level);
     }
   }
 
@@ -89,28 +99,29 @@ public:
     static int lastBtnState = 0;
     static int btnPressNumber = 0;
     static int cyclesSinceBtnChange = 0;
-
-    int btnState = digitalRead(BUTTON_PIN);
-    bool btnChanged = (btnState != lastBtnState);
-    if (btnChanged && (btnState == LOW)) {
-      if (cyclesSinceBtnChange > 8) { // 4 sec
-        _pwm.setPWM(LED_PIN, 0, 0);
-        delay(10);
-        board.powerOff();
+    static int nextBtnCheck = 0;
+    if (millisHasNowPassed(nextBtnCheck)) {
+      int btnState = digitalRead(BUTTON_PIN);
+      bool btnChanged = (btnState != lastBtnState);
+      if (btnChanged && (btnState == LOW)) {
+        if (cyclesSinceBtnChange > 8) { // 4 sec
+          _pwm.setPWM(LED_PIN, 0, 0);
+          delay(10);
+          board.powerOff();
+        }
       }
+
+      if (btnChanged) 
+        cyclesSinceBtnChange = 0;
+      else
+        cyclesSinceBtnChange++;
+
+      lastBtnState = btnState;    
+      nextBtnCheck = futureMillis(500);  
     }
-
-    if (btnChanged) 
-      cyclesSinceBtnChange = 0;
-    else
-      cyclesSinceBtnChange++;
-
-    lastBtnState = btnState;    
   }
 
-  void loop() {
-    BaseCompanionRadioMesh::loop();
-  
+  void gpsHandler() {
     static long next_gps_update = 0;
     if (millisHasNowPassed(next_gps_update)) {
       if (_nmea->isValid()) {
@@ -124,18 +135,13 @@ public:
       }
       next_gps_update = futureMillis(5000);
     }
+  }
 
-    static int nextBtnCheck = 0;
-    if (millisHasNowPassed(nextBtnCheck)) {
-      buttonHandler();
-      nextBtnCheck = futureMillis(500);  
-    }
-
-    static long next_led_update = 0;
-    if (millisHasNowPassed(next_led_update)) {
-      ledHandler();
-      next_led_update = futureMillis(2000);
-    }
+  void loop() {
+    BaseCompanionRadioMesh::loop();
+    gpsHandler();
+    buttonHandler();
+    ledHandler();
   }
 };
 
