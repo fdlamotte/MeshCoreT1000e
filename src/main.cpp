@@ -2,7 +2,7 @@
 #include <bluefruit.h>
 #include "gps.h"
 
-#define _PWM_LOGLEVEL_       4
+//#define _PWM_LOGLEVEL_       4
 
 #define USING_TIMER false
 #include "nRF52_PWM.h"
