@@ -218,62 +218,73 @@ bool BaseCompanionRadioMesh::processAck(const uint8_t *data) {
     expected_ack_crc = 0;  // reset our expected hash, now that we have received ACK
     return true;
   }
-  return false;
+  return checkConnectionsAck(data);
 }
 
-  void BaseCompanionRadioMesh::queueMessage(const ContactInfo& from, uint8_t txt_type, uint8_t path_len, uint32_t sender_timestamp, const char *text) {
-    int i = 0;
-    out_frame[i++] = RESP_CODE_CONTACT_MSG_RECV;
-    memcpy(&out_frame[i], from.id.pub_key, 6); i += 6;  // just 6-byte prefix
-    out_frame[i++] = path_len;
-    out_frame[i++] = txt_type;
-    memcpy(&out_frame[i], &sender_timestamp, 4); i += 4;
-    int tlen = strlen(text);   // TODO: UTF-8 ??
-    if (i + tlen > MAX_FRAME_SIZE) {
-      tlen = MAX_FRAME_SIZE - i;
-    }
-    memcpy(&out_frame[i], text, tlen); i += tlen;
-    addToOfflineQueue(out_frame, i);
-
-    if (_serial->isConnected()) {
-      uint8_t frame[1];
-      frame[0] = PUSH_CODE_MSG_WAITING;  // send push 'tickle'
-      _serial->writeFrame(frame, 1);
-    } else {
-      soundBuzzer();
-    }
+void BaseCompanionRadioMesh::queueMessage(const ContactInfo& from, uint8_t txt_type, uint8_t path_len, uint32_t sender_timestamp, const uint8_t* extra, int extra_len, const char *text) {
+  int i = 0;
+  out_frame[i++] = RESP_CODE_CONTACT_MSG_RECV;
+  memcpy(&out_frame[i], from.id.pub_key, 6); i += 6;  // just 6-byte prefix
+  out_frame[i++] = path_len;
+  out_frame[i++] = txt_type;
+  memcpy(&out_frame[i], &sender_timestamp, 4); i += 4;
+  if (extra_len > 0) {
+    memcpy(&out_frame[i], extra, extra_len); i += extra_len;
   }
-
-  void BaseCompanionRadioMesh::onMessageRecv(const ContactInfo& from, uint8_t path_len, uint32_t sender_timestamp, const char *text) {
-    queueMessage(from, TXT_TYPE_PLAIN, path_len, sender_timestamp, text);
+  int tlen = strlen(text);   // TODO: UTF-8 ??
+  if (i + tlen > MAX_FRAME_SIZE) {
+    tlen = MAX_FRAME_SIZE - i;
   }
+  memcpy(&out_frame[i], text, tlen); i += tlen;
+  addToOfflineQueue(out_frame, i);
 
-  void BaseCompanionRadioMesh::onCommandDataRecv(const ContactInfo& from, uint8_t path_len, uint32_t sender_timestamp, const char *text) {
-    queueMessage(from, TXT_TYPE_CLI_DATA, path_len, sender_timestamp, text);
+  if (_serial->isConnected()) {
+    uint8_t frame[1];
+    frame[0] = PUSH_CODE_MSG_WAITING;  // send push 'tickle'
+    _serial->writeFrame(frame, 1);
+  } else {
+    soundBuzzer();
   }
+}
 
-  void BaseCompanionRadioMesh::onChannelMessageRecv(const mesh::GroupChannel& channel, int in_path_len, uint32_t timestamp, const char *text) {
-    int i = 0;
-    out_frame[i++] = RESP_CODE_CHANNEL_MSG_RECV;
-    out_frame[i++] = 0;  // FUTURE: channel_idx (will just be 'public' for now)
-    out_frame[i++] = in_path_len < 0 ? 0xFF : in_path_len;
-    out_frame[i++] = TXT_TYPE_PLAIN;
-    memcpy(&out_frame[i], &timestamp, 4); i += 4;
-    int tlen = strlen(text);   // TODO: UTF-8 ??
-    if (i + tlen > MAX_FRAME_SIZE) {
-      tlen = MAX_FRAME_SIZE - i;
-    }
-    memcpy(&out_frame[i], text, tlen); i += tlen;
-    addToOfflineQueue(out_frame, i);
+void BaseCompanionRadioMesh::onMessageRecv(const ContactInfo& from, uint8_t path_len, uint32_t sender_timestamp, const char *text) {
+  markConnectionActive(from);   // in case this is from a server, and we have a connection
+  queueMessage(from, TXT_TYPE_PLAIN, path_len, sender_timestamp, NULL, 0, text);
+}
 
-    if (_serial->isConnected()) {
-      uint8_t frame[1];
-      frame[0] = PUSH_CODE_MSG_WAITING;  // send push 'tickle'
-      _serial->writeFrame(frame, 1);
-    } else {
-      soundBuzzer();
-    }
+void BaseCompanionRadioMesh::onCommandDataRecv(const ContactInfo& from, uint8_t path_len, uint32_t sender_timestamp, const char *text) {
+  markConnectionActive(from);   // in case this is from a server, and we have a connection
+  queueMessage(from, TXT_TYPE_CLI_DATA, path_len, sender_timestamp, NULL, 0, text);
+}
+
+void BaseCompanionRadioMesh::onSignedMessageRecv(const ContactInfo& from, uint8_t path_len, uint32_t sender_timestamp, const uint8_t *sender_prefix, const char *text) {
+  markConnectionActive(from);
+  saveContacts();   // from.sync_since change needs to be persisted
+  queueMessage(from, TXT_TYPE_SIGNED_PLAIN, path_len, sender_timestamp, sender_prefix, 4, text);
+}
+
+void BaseCompanionRadioMesh::onChannelMessageRecv(const mesh::GroupChannel& channel, int in_path_len, uint32_t timestamp, const char *text) {
+  int i = 0;
+  out_frame[i++] = RESP_CODE_CHANNEL_MSG_RECV;
+  out_frame[i++] = 0;  // FUTURE: channel_idx (will just be 'public' for now)
+  out_frame[i++] = in_path_len < 0 ? 0xFF : in_path_len;
+  out_frame[i++] = TXT_TYPE_PLAIN;
+  memcpy(&out_frame[i], &timestamp, 4); i += 4;
+  int tlen = strlen(text);   // TODO: UTF-8 ??
+  if (i + tlen > MAX_FRAME_SIZE) {
+    tlen = MAX_FRAME_SIZE - i;
   }
+  memcpy(&out_frame[i], text, tlen); i += tlen;
+  addToOfflineQueue(out_frame, i);
+
+  if (_serial->isConnected()) {
+    uint8_t frame[1];
+    frame[0] = PUSH_CODE_MSG_WAITING;  // send push 'tickle'
+    _serial->writeFrame(frame, 1);
+  } else {
+    soundBuzzer();
+  }
+}
 
 void BaseCompanionRadioMesh::onContactResponse(const ContactInfo& contact, const uint8_t* data, uint8_t len) {
   uint32_t sender_timestamp;
@@ -391,11 +402,9 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
     out_frame[i++] = FIRMWARE_VER_CODE;
     memset(&out_frame[i], 0, 6); i += 6;  // reserved
     memset(&out_frame[i], 0, 12);
-    strcpy((char *) &out_frame[i], FIRMWARE_BUILD_DATE);
-    i += 12;
-    const char* name = _board->getManufacturerName();
-    int tlen = strlen(name);
-    memcpy(&out_frame[i], name, tlen); i += tlen;
+    strcpy((char *) &out_frame[i], FIRMWARE_BUILD_DATE); i += 12;
+    StrHelper::strzcpy((char *) &out_frame[i], "NEED boardname !", 40); i += 40;
+    StrHelper::strzcpy((char *) &out_frame[i], FIRMWARE_VERSION, 20); i += 20;
     _serial->writeFrame(out_frame, i);
   } else if (cmd_frame[0] == CMD_APP_START && len >= 8) {   // sent when app establishes connection, respond with node ID
     //  cmd_frame[1..7]  reserved future
@@ -793,5 +802,7 @@ void BaseCompanionRadioMesh::loop() {
       _serial->writeFrame(out_frame, 5);
       _iter_started = false;
     }
+  } else if (!_serial->isWriteBusy()) {
+    checkConnections();
   }
 }

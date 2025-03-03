@@ -49,13 +49,18 @@
 #define DIRECT_SEND_PERHOP_EXTRA_MILLIS   250
 
 #ifndef MAX_LORA_TX_POWER
-  #define MAX_LORA_TX_POWER  30
+  #define MAX_LORA_TX_POWER  20
 #endif
 /*------------ Frame Protocol --------------*/
 
-#define FIRMWARE_VER_CODE    1
+#define FIRMWARE_VER_CODE    2
+
 #ifndef FIRMWARE_BUILD_DATE
-#define FIRMWARE_BUILD_DATE   "27 Feb 2025"
+  #define FIRMWARE_BUILD_DATE   "3 Mar 2025"
+#endif
+
+#ifndef FIRMWARE_VERSION
+  #define FIRMWARE_VERSION   "v1.0.0"
 #endif
 
 #define CMD_APP_START              1
@@ -85,6 +90,8 @@
 #define CMD_SEND_RAW_DATA         25
 #define CMD_SEND_LOGIN            26
 #define CMD_SEND_STATUS_REQ       27
+#define CMD_HAS_CONNECTION        28
+#define CMD_LOGOUT                29   // 'Disconnect'
 
 #define RESP_CODE_OK                0
 #define RESP_CODE_ERR               1
@@ -208,11 +215,12 @@ protected:
   void onMessageRecv(const ContactInfo& from, uint8_t path_len, uint32_t sender_timestamp, const char *text) override;
   void onChannelMessageRecv(const mesh::GroupChannel& channel, int in_path_len, uint32_t timestamp, const char *text) override;
   void onCommandDataRecv(const ContactInfo& from, uint8_t path_len, uint32_t sender_timestamp, const char *text) override;
+  void onSignedMessageRecv(const ContactInfo& from, uint8_t path_len, uint32_t sender_timestamp, const uint8_t *sender_prefix, const char *text) override;
   void onContactResponse(const ContactInfo& contact, const uint8_t* data, uint8_t len) override;
   void onRawDataRecv(mesh::Packet* packet) override;
   void onSendTimeout() override;
 
-  void queueMessage(const ContactInfo& from, uint8_t txt_type, uint8_t path_len, uint32_t sender_timestamp, const char *text);
+  void queueMessage(const ContactInfo& from, uint8_t txt_type, uint8_t path_len, uint32_t sender_timestamp, const uint8_t* extra, int extra_len, const char *text);
   int getUnreadMsgNb() {return offline_queue_len;}
   virtual void onNextMsgSync() {};
 
