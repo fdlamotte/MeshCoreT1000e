@@ -49,7 +49,7 @@
 #define DIRECT_SEND_PERHOP_EXTRA_MILLIS   250
 
 #ifndef MAX_LORA_TX_POWER
-  #define MAX_LORA_TX_POWER  20
+  #define MAX_LORA_TX_POWER  30
 #endif
 /*------------ Frame Protocol --------------*/
 
