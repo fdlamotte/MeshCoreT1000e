@@ -372,7 +372,7 @@ void BaseCompanionRadioMesh::begin(FILESYSTEM& fs, mesh::RNG& trng) {
   _phy->setSpreadingFactor(_prefs.sf);
   _phy->setBandwidth(_prefs.bw);
   _phy->setCodingRate(_prefs.cr);
-  _phy->setOutputPower(_prefs.tx_power_dbm, true);
+  _phy->setOutputPower(_prefs.tx_power_dbm);
 }
 
 void BaseCompanionRadioMesh::startInterface(BaseSerialInterface& serial) {
@@ -683,7 +683,7 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
     } else {
       _prefs.tx_power_dbm = cmd_frame[1];
       savePrefs();
-      _phy->setOutputPower(_prefs.tx_power_dbm, true);
+      _phy->setOutputPower(_prefs.tx_power_dbm);
       writeOKFrame(); 
     }
   } else if (cmd_frame[0] == CMD_SET_TUNING_PARAMS) {
