@@ -92,6 +92,7 @@
 #define CMD_SEND_STATUS_REQ       27
 #define CMD_HAS_CONNECTION        28
 #define CMD_LOGOUT                29   // 'Disconnect'
+#define CMD_GET_CONTACT_BY_KEY    30
 
 #define RESP_CODE_OK                0
 #define RESP_CODE_ERR               1

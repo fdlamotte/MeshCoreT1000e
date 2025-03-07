@@ -604,6 +604,14 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
     } else {
       writeErrFrame();  // not found, or unable to send
     }
+  } else if (cmd_frame[0] == CMD_GET_CONTACT_BY_KEY) {
+      uint8_t* pub_key = &cmd_frame[1];
+      ContactInfo* contact = lookupContactByPubKey(pub_key, PUB_KEY_SIZE);
+      if (contact) {
+        writeContactRespFrame(RESP_CODE_CONTACT, *contact);
+      } else {
+        writeErrFrame();  // not found
+      }
   } else if (cmd_frame[0] == CMD_EXPORT_CONTACT) {
     if (len < 1 + PUB_KEY_SIZE) {
       // export SELF
