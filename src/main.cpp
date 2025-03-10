@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <bluefruit.h>
-#include "gps.h"
+
+#include "helpers/MicroNMEALocationProvider.h"
 
 //#define _PWM_LOGLEVEL_       4
 
@@ -33,6 +34,8 @@
 
 #include <helpers/BaseCompanionRadioMesh.h>
 
+
+
 // Believe it or not, this std C function is busted on some platforms!
 static uint32_t _atoi(const char* sp) {
   uint32_t n = 0;
@@ -59,11 +62,11 @@ SimpleMeshTables tables;
 
 class T1000eMesh : public BaseCompanionRadioMesh {
   bool gps_time_sync_needed = true;
-  MicroNMEA* _nmea;
+  LocationProvider* _nmea;
   nRF52_PWM _pwm;
 
 public:
-  T1000eMesh(RADIO_CLASS& phy, RadioLibWrapper& rw, mesh::RNG& rng, mesh::RTCClock& rtc, SimpleMeshTables& tables, MicroNMEA& nmea)
+  T1000eMesh(RADIO_CLASS& phy, RadioLibWrapper& rw, mesh::RNG& rng, mesh::RTCClock& rtc, SimpleMeshTables& tables, LocationProvider& nmea)
      : BaseCompanionRadioMesh(phy, rw, rng, rtc, tables, board, PUBLIC_GROUP_PSK, LORA_FREQ, LORA_SF, LORA_BW, LORA_CR, LORA_TX_POWER), 
      _nmea(&nmea), _pwm(nRF52_PWM(LED_PIN, 1000.0f, 100.0f)) {
 
@@ -123,13 +126,15 @@ public:
 
   void gpsHandler() {
     static long next_gps_update = 0;
+
+    _nmea->loop();
+
     if (millisHasNowPassed(next_gps_update)) {
       if (_nmea->isValid()) {
         _prefs.node_lat = ((double)_nmea->getLatitude())/1000000.;
         _prefs.node_lon = ((double)_nmea->getLongitude())/1000000.;
         if (gps_time_sync_needed) {
-          DateTime dt(_nmea->getYear(), _nmea->getMonth(),_nmea->getDay(),_nmea->getHour(),_nmea->getMinute(),_nmea->getSecond());
-          getRTCClock()->setCurrentTime(dt.unixtime());
+          getRTCClock()->setCurrentTime(_nmea->getTimestamp());
           gps_time_sync_needed = false;
         }
       }
@@ -145,8 +150,8 @@ public:
   }
 };
 
+MicroNMEALocationProvider nmea = MicroNMEALocationProvider(Serial1);
 T1000eMesh the_mesh(radio, *new WRAPPER_CLASS(radio, board), fast_rng, *new VolatileRTCClock(), tables, nmea);
-
 
 void halt() {
   while (1) ;
@@ -155,6 +160,7 @@ void halt() {
 void setup() {
 
   Serial.begin(115200);
+  Serial1.begin(115200);
   board.begin();
 
   float tcxo = 1.6f;
@@ -184,17 +190,9 @@ void setup() {
 
   // GPS Setup
   digitalWrite(GPS_EN, HIGH);
-  gps_setup();
+  nmea.reset();
 }
 
 void loop() {
-  gps_feed_nmea();
-
-  static int nextCheck = 0;
-  if (the_mesh.millisHasNowPassed(nextCheck)) {
-    gps_loop();
-    nextCheck = the_mesh.futureMillis(5000);
-  }
-
   the_mesh.loop();
 }
