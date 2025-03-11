@@ -1,6 +1,10 @@
 #include <Arduino.h>
 #include <bluefruit.h>
 
+#ifndef GPS_RESET_FORCE
+#define GPS_RESET_FORCE HIGH
+#endif
+
 #include "helpers/MicroNMEALocationProvider.h"
 
 //#define _PWM_LOGLEVEL_       4
@@ -33,7 +37,6 @@
 #define  PUBLIC_GROUP_PSK  "izOH6cXN6mrJ5e26oRXNcg=="
 
 #include <helpers/BaseCompanionRadioMesh.h>
-
 
 
 // Believe it or not, this std C function is busted on some platforms!
@@ -189,8 +192,8 @@ void setup() {
   the_mesh.startInterface(serial_interface);
 
   // GPS Setup
-  digitalWrite(GPS_EN, HIGH);
-  nmea.reset();
+  //digitalWrite(GPS_EN, HIGH);
+  nmea.begin();
 }
 
 void loop() {
