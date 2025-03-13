@@ -66,6 +66,59 @@ void BaseCompanionRadioMesh::saveContacts() {
   }
 }
 
+void BaseCompanionRadioMesh::loadChannels() {
+  if (_fs->exists("/channels2")) {
+    File file = _fs->open("/channels2");
+    if (file) {
+      bool full = false;
+      uint8_t channel_idx = 0;
+      while (!full) {
+        ChannelDetails ch;
+        uint8_t unused[4];
+
+        bool success = (file.read(unused, 4) == 4);
+        success = success && (file.read((uint8_t *) ch.name, 32) == 32);
+        success = success && (file.read((uint8_t *) ch.channel.secret, 32) == 32);
+
+        if (!success) break;  // EOF
+
+        if (setChannel(channel_idx, ch)) {
+          channel_idx++;
+        } else {
+          full = true;
+        }
+      }
+      file.close();
+    }
+  }
+}
+
+void BaseCompanionRadioMesh::saveChannels() {
+#if defined(NRF52_PLATFORM)
+  File file = _fs->open("/channels2", FILE_O_WRITE);
+  if (file) { file.seek(0); file.truncate(); }
+#else
+  File file = _fs->open("/channels2", "w", true);
+#endif
+  if (file) {
+    uint8_t channel_idx = 0;
+    ChannelDetails ch;
+    uint8_t unused[4];
+    memset(unused, 0, 4);
+  
+    while (getChannel(channel_idx, ch)) {
+      bool success = (file.write(unused, 4) == 4);
+      success = success && (file.write((uint8_t *) ch.name, 32) == 32);
+      success = success && (file.write((uint8_t *) ch.channel.secret, 32) == 32);
+  
+      if (!success) break;  // write failed
+      channel_idx++;
+    }
+    file.close();
+  }
+}
+
+
 int BaseCompanionRadioMesh::getBlobByKey(const uint8_t key[], int key_len, uint8_t dest_buf[]) {
   char path[64];
   char fname[18];
@@ -266,7 +319,7 @@ void BaseCompanionRadioMesh::onSignedMessageRecv(const ContactInfo& from, uint8_
 void BaseCompanionRadioMesh::onChannelMessageRecv(const mesh::GroupChannel& channel, int in_path_len, uint32_t timestamp, const char *text) {
   int i = 0;
   out_frame[i++] = RESP_CODE_CHANNEL_MSG_RECV;
-  out_frame[i++] = 0;  // FUTURE: channel_idx (will just be 'public' for now)
+  out_frame[i++] = findChannelIdx(channel);
   out_frame[i++] = in_path_len < 0 ? 0xFF : in_path_len;
   out_frame[i++] = TXT_TYPE_PLAIN;
   memcpy(&out_frame[i], &timestamp, 4); i += 4;
@@ -366,7 +419,8 @@ void BaseCompanionRadioMesh::begin(FILESYSTEM& fs, mesh::RNG& trng) {
   _fs->mkdir("/bl");
 
   loadContacts();
-  _public = addChannel(_psk); // pre-configure Andy's public channel
+  addChannel("Public", PUBLIC_GROUP_PSK); // pre-configure Andy's public channel
+  loadChannels();
 
   _phy->setFrequency(_prefs.freq);
   _phy->setSpreadingFactor(_prefs.sf);
@@ -400,10 +454,12 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
     int i = 0;
     out_frame[i++] = RESP_CODE_DEVICE_INFO;
     out_frame[i++] = FIRMWARE_VER_CODE;
-    memset(&out_frame[i], 0, 6); i += 6;  // reserved
+    out_frame[i++] = MAX_CONTACTS / 2;        // v3+
+    out_frame[i++] = MAX_GROUP_CHANNELS;      // v3+
+    memset(&out_frame[i], 0, 4); i += 4;  // reserved
     memset(&out_frame[i], 0, 12);
     strcpy((char *) &out_frame[i], FIRMWARE_BUILD_DATE); i += 12;
-    StrHelper::strzcpy((char *) &out_frame[i], "NEED boardname !", 40); i += 40;
+    StrHelper::strzcpy((char *) &out_frame[i], _board->getManufacturerName(), 40); i += 40;
     StrHelper::strzcpy((char *) &out_frame[i], FIRMWARE_VERSION, 20); i += 20;
     _serial->writeFrame(out_frame, i);
   } else if (cmd_frame[0] == CMD_APP_START && len >= 8) {   // sent when app establishes connection, respond with node ID
@@ -426,7 +482,7 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
     memcpy(&out_frame[i], &lat, 4); i += 4;
     memcpy(&out_frame[i], &lon, 4); i += 4;
     memcpy(&out_frame[i], &alt, 4); i += 4;
-    
+
     uint32_t freq = _prefs.freq * 1000;
     memcpy(&out_frame[i], &freq, 4); i += 4;
     uint32_t bw = _prefs.bw*1000;
@@ -437,50 +493,52 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
     int tlen = strlen(_prefs.node_name);   // revisit: UTF_8 ??
     memcpy(&out_frame[i], _prefs.node_name, tlen); i += tlen;
     _serial->writeFrame(out_frame, i);
-    } else if (cmd_frame[0] == CMD_SEND_TXT_MSG && len >= 14) {
-      int i = 1;
-      uint8_t txt_type = cmd_frame[i++];
-      uint8_t attempt = cmd_frame[i++];
-      uint32_t msg_timestamp;
-      memcpy(&msg_timestamp, &cmd_frame[i], 4); i += 4;
-      uint8_t* pub_key_prefix = &cmd_frame[i]; i += 6;
-      ContactInfo* recipient = lookupContactByPubKey(pub_key_prefix, 6);
-      if (recipient && attempt < 4 && (txt_type == TXT_TYPE_PLAIN || txt_type == TXT_TYPE_CLI_DATA)) {
-        char *text = (char *) &cmd_frame[i];
-        int tlen = len - i;
-        uint32_t est_timeout;
-        text[tlen] = 0;  // ensure null
-        int result;
-        if (txt_type == TXT_TYPE_CLI_DATA) {
-          result = sendCommandData(*recipient, msg_timestamp, attempt, text, est_timeout);
-          expected_ack_crc = 0;  // no Ack expected
-        } else {
-          result = sendMessage(*recipient, msg_timestamp, attempt, text, expected_ack_crc, est_timeout);
-        }
-        // TODO: add expected ACK to table
-        if (result == MSG_SEND_FAILED) {
-          writeErrFrame();
-        } else {
-          last_msg_sent = _ms->getMillis();
-
-          out_frame[0] = RESP_CODE_SENT;
-          out_frame[1] = (result == MSG_SEND_SENT_FLOOD) ? 1 : 0;
-          memcpy(&out_frame[2], &expected_ack_crc, 4);
-          memcpy(&out_frame[6], &est_timeout, 4);
-          _serial->writeFrame(out_frame, 10);
-        }
+  } else if (cmd_frame[0] == CMD_SEND_TXT_MSG && len >= 14) {
+    int i = 1;
+    uint8_t txt_type = cmd_frame[i++];
+    uint8_t attempt = cmd_frame[i++];
+    uint32_t msg_timestamp;
+    memcpy(&msg_timestamp, &cmd_frame[i], 4); i += 4;
+    uint8_t* pub_key_prefix = &cmd_frame[i]; i += 6;
+    ContactInfo* recipient = lookupContactByPubKey(pub_key_prefix, 6);
+    if (recipient && attempt < 4 && (txt_type == TXT_TYPE_PLAIN || txt_type == TXT_TYPE_CLI_DATA)) {
+      char *text = (char *) &cmd_frame[i];
+      int tlen = len - i;
+      uint32_t est_timeout;
+      text[tlen] = 0;  // ensure null
+      int result;
+      if (txt_type == TXT_TYPE_CLI_DATA) {
+        result = sendCommandData(*recipient, msg_timestamp, attempt, text, est_timeout);
+        expected_ack_crc = 0;  // no Ack expected
       } else {
-        writeErrFrame(); // unknown recipient, or unsuported TXT_TYPE_*
+        result = sendMessage(*recipient, msg_timestamp, attempt, text, expected_ack_crc, est_timeout);
       }
+      // TODO: add expected ACK to table
+      if (result == MSG_SEND_FAILED) {
+        writeErrFrame();
+      } else {
+        last_msg_sent = _ms->getMillis();
+
+        out_frame[0] = RESP_CODE_SENT;
+        out_frame[1] = (result == MSG_SEND_SENT_FLOOD) ? 1 : 0;
+        memcpy(&out_frame[2], &expected_ack_crc, 4);
+        memcpy(&out_frame[6], &est_timeout, 4);
+        _serial->writeFrame(out_frame, 10);
+      }
+    } else {
+      writeErrFrame(); // unknown recipient, or unsuported TXT_TYPE_*
+    }
   } else if (cmd_frame[0] == CMD_SEND_CHANNEL_TXT_MSG) {  // send GroupChannel msg
     int i = 1;
     uint8_t txt_type = cmd_frame[i++];  // should be TXT_TYPE_PLAIN
-    uint8_t channel_idx = cmd_frame[i++];   // reserved future
+    uint8_t channel_idx = cmd_frame[i++];
     uint32_t msg_timestamp;
     memcpy(&msg_timestamp, &cmd_frame[i], 4); i += 4;
     const char *text = (char *) &cmd_frame[i];
 
-    if (txt_type == TXT_TYPE_PLAIN && sendGroupMessage(msg_timestamp, *_public, _prefs.node_name, text, len - i)) {   // hard-coded to 'public' channel for now
+    ChannelDetails channel;
+    bool success = getChannel(channel_idx, channel);
+    if (success && txt_type == TXT_TYPE_PLAIN && sendGroupMessage(msg_timestamp, channel.channel, _prefs.node_name, text, len - i)) {
       writeOKFrame();
     } else {
       writeErrFrame();
@@ -605,13 +663,13 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
       writeErrFrame();  // not found, or unable to send
     }
   } else if (cmd_frame[0] == CMD_GET_CONTACT_BY_KEY) {
-      uint8_t* pub_key = &cmd_frame[1];
-      ContactInfo* contact = lookupContactByPubKey(pub_key, PUB_KEY_SIZE);
-      if (contact) {
-        writeContactRespFrame(RESP_CODE_CONTACT, *contact);
-      } else {
-        writeErrFrame();  // not found
-      }
+    uint8_t* pub_key = &cmd_frame[1];
+    ContactInfo* contact = lookupContactByPubKey(pub_key, PUB_KEY_SIZE);
+    if (contact) {
+      writeContactRespFrame(RESP_CODE_CONTACT, *contact);
+    } else {
+      writeErrFrame();  // not found
+    }
   } else if (cmd_frame[0] == CMD_EXPORT_CONTACT) {
     if (len < 1 + PUB_KEY_SIZE) {
       // export SELF
@@ -645,7 +703,6 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
     int out_len;
     if ((out_len = getFromOfflineQueue(out_frame)) > 0) {
       _serial->writeFrame(out_frame, out_len);
-      onNextMsgSync();
     } else {
       out_frame[0] = RESP_CODE_NO_MORE_MESSAGES;
       _serial->writeFrame(out_frame, 1);
@@ -684,7 +741,7 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
       _prefs.tx_power_dbm = cmd_frame[1];
       savePrefs();
       _phy->setOutputPower(_prefs.tx_power_dbm);
-      writeOKFrame(); 
+      writeOKFrame();
     }
   } else if (cmd_frame[0] == CMD_SET_TUNING_PARAMS) {
     int i = 1;
@@ -781,6 +838,44 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
       }
     } else {
       writeErrFrame();  // contact not found
+    }
+  } else if (cmd_frame[0] == CMD_HAS_CONNECTION && len >= 1+PUB_KEY_SIZE) {
+    uint8_t* pub_key = &cmd_frame[1];
+    if (hasConnectionTo(pub_key)) {
+      writeOKFrame();
+    } else {
+      writeErrFrame();
+    }
+  } else if (cmd_frame[0] == CMD_LOGOUT && len >= 1+PUB_KEY_SIZE) {
+    uint8_t* pub_key = &cmd_frame[1];
+    stopConnection(pub_key);
+    writeOKFrame();
+  } else if (cmd_frame[0] == CMD_GET_CHANNEL && len >= 2) {
+    uint8_t channel_idx = cmd_frame[1];
+    ChannelDetails channel;
+    if (getChannel(channel_idx, channel)) {
+      int i = 0;
+      out_frame[i++] = RESP_CODE_CHANNEL_INFO;
+      out_frame[i++] = channel_idx;
+      strcpy((char *)&out_frame[i], channel.name); i += 32;
+      memcpy(&out_frame[i], channel.channel.secret, 16); i += 16;   // NOTE: only 128-bit supported
+      _serial->writeFrame(out_frame, i);
+    } else {
+      writeErrFrame();
+    }
+  } else if (cmd_frame[0] == CMD_SET_CHANNEL && len >= 2+32+32) {
+    writeErrFrame();  // not supported (yet)
+  } else if (cmd_frame[0] == CMD_SET_CHANNEL && len >= 2+32+16) {
+    uint8_t channel_idx = cmd_frame[1];
+    ChannelDetails channel;
+    StrHelper::strncpy(channel.name, (char *) &cmd_frame[2], 32);
+    memset(channel.channel.secret, 0, sizeof(channel.channel.secret));
+    memcpy(channel.channel.secret, &cmd_frame[2+32], 16);   // NOTE: only 128-bit supported
+    if (setChannel(channel_idx, channel)) {
+      saveChannels();
+      writeOKFrame();
+    } else {
+      writeErrFrame();
     }
   } else {
     writeErrFrame();
