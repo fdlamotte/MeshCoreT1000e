@@ -863,6 +863,8 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
     } else {
       writeErrFrame();
     }
+  } else if (cmd_frame[0] == CMD_SET_CHANNEL && len >= 2+32+32) {
+    writeErrFrame();  // not supported (yet)
   } else if (cmd_frame[0] == CMD_SET_CHANNEL && len >= 2+32+16) {
     uint8_t channel_idx = cmd_frame[1];
     ChannelDetails channel;
