@@ -117,14 +117,16 @@ public:
   void reactivate() {
     if (state == SLEEP) {
       state = ACTIVE;
-      _serial->enable();
+      //_serial->enable();
+      Bluefruit.Advertising.start(300);                // 0 = Don't stop advertising after n seconds 
     }
     state_activation_time = millis();
   }
 
   void deactivate() {
     state = SLEEP;
-    _serial->disable();
+//    _serial->disable();
+    Bluefruit.Advertising.stop();
     state_activation_time = millis();
   }
 
