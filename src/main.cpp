@@ -120,14 +120,12 @@ public:
       _serial->enable();
     }
     state_activation_time = millis();
-    Serial.println("Reactivating");
   }
 
   void deactivate() {
     state = SLEEP;
     _serial->disable();
     state_activation_time = millis();
-    Serial.println("Desactivating");
   }
 
   void stateHandler() {

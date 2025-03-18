@@ -58,7 +58,7 @@
 #define FIRMWARE_VER_CODE    2
 
 #ifndef FIRMWARE_BUILD_DATE
-  #define FIRMWARE_BUILD_DATE   "17 Mar 2025"
+  #define FIRMWARE_BUILD_DATE   "18 Mar 2025"
 #endif
 
 #ifndef FIRMWARE_VERSION
