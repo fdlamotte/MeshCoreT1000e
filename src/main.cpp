@@ -68,10 +68,15 @@ class T1000eMesh : public BaseCompanionRadioMesh {
   LocationProvider* _nmea;
   nRF52_PWM _pwm;
 
+  enum {SLEEP=0, ACTIVE=1} state;
+  uint32_t state_activation_time = 0;
+  bool gps_active;
+
 public:
   T1000eMesh(RADIO_CLASS& phy, RadioLibWrapper& rw, mesh::RNG& rng, mesh::RTCClock& rtc, SimpleMeshTables& tables, LocationProvider& nmea)
      : BaseCompanionRadioMesh(phy, rw, rng, rtc, tables, board, PUBLIC_GROUP_PSK, LORA_FREQ, LORA_SF, LORA_BW, LORA_CR, LORA_TX_POWER), 
-     _nmea(&nmea), _pwm(nRF52_PWM(LED_PIN, 1000.0f, 100.0f)) {
+     _nmea(&nmea), _pwm(nRF52_PWM(LED_PIN, 1000.0f, 100.0f)), state{SLEEP}, state_activation_time(millis()), 
+     gps_active(true) {
 
      }
 
@@ -85,15 +90,18 @@ public:
       int pwm_level;
 
       if ((++cycles)%2 == 0) {
-        pwm_level = gps_fix ? 40 : 0;
-        next_led_update = futureMillis(2000);
+        pwm_level = (gps_active && gps_fix)? 40 : 0;
+        next_led_update = gps_active ? futureMillis(1000) : futureMillis(2000);
       } else {
         if (has_msg) {
           pwm_level = 95;
-          next_led_update = futureMillis(500);
+          next_led_update = futureMillis(200);
+        } else if (state == SLEEP) {
+          next_led_update = futureMillis(2000);
+          pwm_level = 20;
         } else {
           pwm_level = 30;
-          next_led_update = futureMillis(2000);
+          next_led_update = futureMillis(1000);
         }
       }
       _pwm.setPWM(LED_PIN, 1000, pwm_level);
@@ -101,29 +109,84 @@ public:
     }
   }
 
+  void handleCmdFrame(size_t len) override {
+    BaseCompanionRadioMesh::handleCmdFrame(len);
+    reactivate(); // get more cx time
+  }
+
+  void reactivate() {
+    if (state = SLEEP) {
+      state = ACTIVE;
+      _serial->enable();
+    }
+    state_activation_time = millis();
+  }
+
+  void deactivate() {
+    state = SLEEP;
+    _serial->disable();
+    state_activation_time = millis();
+  }
+
+  void stateHandler() {
+    if (state == SLEEP) return;
+
+    static int nextCheck = 0;
+
+    if (millisHasNowPassed(nextCheck)) {
+      if (_serial->isConnected()) {
+        state_activation_time = millis();
+        return;
+      }
+
+      if (millis() - state_activation_time > 300 * 1000) {
+        deactivate();
+      }
+      nextCheck = futureMillis(500);
+    }
+  }
+
+  void startInterface(BaseSerialInterface& serial) override {
+    BaseCompanionRadioMesh::startInterface(serial);
+    state_activation_time = millis();
+    state = ACTIVE;
+  }
+
   void buttonHandler() {
     static int lastBtnState = 0;
     static int btnPressNumber = 0;
-    static int cyclesSinceBtnChange = 0;
+    static int lastBtnChangedTime = 0;
     static int nextBtnCheck = 0;
+
     if (millisHasNowPassed(nextBtnCheck)) {
       int btnState = digitalRead(BUTTON_PIN);
       bool btnChanged = (btnState != lastBtnState);
-      if (btnChanged && (btnState == LOW)) {
-        if (cyclesSinceBtnChange > 8) { // 4 sec
+      if (btnChanged && (btnState == LOW)) { // low = release
+        if (millis() > lastBtnChangedTime + 4000) { // poweroff
           _pwm.setPWM(LED_PIN, 0, 0);
           delay(10);
           board.powerOff();
+        } else if (millis() > lastBtnChangedTime + 1000) {
+          toggleGps();
+        } else { // change state to active for 5 min
+          reactivate();
         }
       }
 
       if (btnChanged) 
-        cyclesSinceBtnChange = 0;
-      else
-        cyclesSinceBtnChange++;
+        lastBtnChangedTime = millis();
 
       lastBtnState = btnState;    
-      nextBtnCheck = futureMillis(500);  
+      nextBtnCheck = futureMillis(100);  
+    }
+  }
+
+  void toggleGps() {
+    gps_active = !gps_active;
+    if (gps_active) {
+      _nmea->begin();
+    } else {
+      _nmea->stop();
     }
   }
 
@@ -150,6 +213,7 @@ public:
     gpsHandler();
     buttonHandler();
     ledHandler();
+    stateHandler();
   }
 };
 
@@ -165,6 +229,9 @@ void setup() {
   Serial.begin(115200);
   Serial1.begin(115200);
   board.begin();
+
+  // trying low power ...
+  sd_power_mode_set(NRF_POWER_MODE_LOWPWR);
 
   float tcxo = 1.6f;
 
@@ -189,6 +256,8 @@ void setup() {
   sprintf(dev_name, "MeshCore-%s", the_mesh.getNodeName());
   serial_interface.begin(dev_name, BLE_PIN_CODE);
 
+  Bluefruit.setTxPower(-16);    // Check bluefruit.h for supported values
+
   the_mesh.startInterface(serial_interface);
 
   // GPS Setup
@@ -198,4 +267,5 @@ void setup() {
 
 void loop() {
   the_mesh.loop();
+  delay(1); // sync on tick
 }

@@ -259,8 +259,8 @@ public:
 
   void begin(FILESYSTEM& fs, mesh::RNG& trng);
   const char* getNodeName() { return _prefs.node_name; }
-  void startInterface(BaseSerialInterface& serial);
+  virtual void startInterface(BaseSerialInterface& serial);
   void savePrefs();
-  void handleCmdFrame(size_t len);
+  virtual void handleCmdFrame(size_t len);
   void loop();
 };

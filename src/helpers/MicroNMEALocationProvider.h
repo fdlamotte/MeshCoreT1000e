@@ -53,6 +53,12 @@ public :
         }
     }
 
+    void stop() override {
+        if (_pin_en != -1) {
+            digitalWrite(_pin_en, LOW);
+        }        
+    }
+
     long getLatitude() override { return nmea.getLatitude(); }
     long getLongitude() override { return nmea.getLongitude(); }
     bool isValid() override { return nmea.isValid(); }

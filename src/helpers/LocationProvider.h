@@ -12,5 +12,6 @@ public:
     virtual long getTimestamp() = 0;
     virtual void reset();
     virtual void begin();
+    virtual void stop();
     virtual void loop();
 };
