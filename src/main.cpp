@@ -169,6 +169,7 @@ public:
           board.powerOff();
         } else if (millis() > lastBtnChangedTime + 1000) {
           toggleGps();
+          reactivate();
         } else { // change state to active for 5 min
           reactivate();
         }

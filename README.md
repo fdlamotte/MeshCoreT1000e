@@ -1,13 +1,48 @@
 # MeshCoreT1000e
-MeshCore support for Seeed T1000e tracker 
 
-This repo contains the source files and the PlatformIO environments to build firmwares using [MeshCore](https://meshcore.co.uk) on the [Seeed T1000e Tracker](https://www.seeedstudio.com/SenseCAP-Card-Tracker-T1000-E-for-Meshtastic-p-5913.html).
+Custom MeshCore support for Seeed T1000e tracker 
+
+This repo contains the source files and the PlatformIO environments to build custom firmwares using [MeshCore](https://meshcore.co.uk) on the [Seeed T1000e Tracker](https://www.seeedstudio.com/SenseCAP-Card-Tracker-T1000-E-for-Meshtastic-p-5913.html).
 
 ## How to test
 
-You'll find firmwares baked by Andy Kirby on the [MeshCore web flasher](https://flasher.meshcore.co.uk/).
+On [MeshCore web flasher](https://flasher.meshcore.co.uk/) you'll find official firmware for t1000e. This repo adds some functionalities that have not been added yet into main repo because there we try to find more generic ways of doing things.
 
-Download the `.uf2`, put your device in DFU by pressing the button and plugging the cable twice and copy the firmware file to the removable drive.
+I provide some uf2s of the custom firmware in this repo's relase. To flash the `.uf2`, put your device in DFU by pressing the button and plugging the cable twice and copy the firmware file to the removable drive.
+
+## Features
+
+* gps support (3s press to enable)
+* some power optimization
+* BLE advertisement stops after 5min (short press on the button re-enables it for 5min)
+* Notification led (upstreamed)
+* Power button support (long press > 5s) (upstreamed)
+
+upcoming
+* Buzzer
+* Serial console for options specific to t1000e
+
+## Buttons and leds 
+
+### Notification led
+
+Leds shows the status of the device, it varies in brightness (pwm) and time. There are two time at the moment, communication status and gps status.
+
+Communication status (mostly on state) :
+* Unread messages : 95% brightness, 200ms
+* BLE advertisement active : 20% brightness, 2s
+* BLE advertisement inactive : 20% brightness, 3s
+
+GPS status :
+* GPS off : led off, 3s
+* GPS on, no fix : led off, 2s
+* GPS on, fixed : 40% brightness, 2s (so when there is a fix, led brightness appears constant)
+
+### User button
+
+* long press (>4s) : turns device off (led stops)
+* medium press (>1s) : toggles gps
+* short press : activates BLE adevertising for 5min
 
 ## To compile the firmware
 
