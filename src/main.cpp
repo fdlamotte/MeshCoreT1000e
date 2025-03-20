@@ -76,7 +76,7 @@ public:
   T1000eMesh(RADIO_CLASS& phy, RadioLibWrapper& rw, mesh::RNG& rng, mesh::RTCClock& rtc, SimpleMeshTables& tables, LocationProvider& nmea)
      : BaseCompanionRadioMesh(phy, rw, rng, rtc, tables, board, PUBLIC_GROUP_PSK, LORA_FREQ, LORA_SF, LORA_BW, LORA_CR, LORA_TX_POWER), 
      _nmea(&nmea), _pwm(nRF52_PWM(LED_PIN, 1000.0f, 100.0f)), state{SLEEP}, state_activation_time(millis()), 
-     gps_active(true) {
+     gps_active(false) {
 
      }
 
@@ -105,7 +105,6 @@ public:
         }
       }
       _pwm.setPWM(LED_PIN, 1000, pwm_level);
-
     }
   }
 
@@ -212,7 +211,7 @@ public:
 
   void loop() {
     BaseCompanionRadioMesh::loop();
-    gpsHandler();
+    if (gps_active) gpsHandler();
     buttonHandler();
     ledHandler();
     stateHandler();

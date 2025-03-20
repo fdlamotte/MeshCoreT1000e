@@ -35,6 +35,26 @@
 
 #include <helpers/BaseChatMesh.h>
 
+#ifndef LORA_FREQ
+  #define LORA_FREQ   915.0
+#endif
+#ifndef LORA_BW
+  #define LORA_BW     250
+#endif
+#ifndef LORA_SF
+  #define LORA_SF     10
+#endif
+#ifndef LORA_CR
+  #define LORA_CR      5
+#endif
+#ifndef LORA_TX_POWER
+  #define LORA_TX_POWER  20
+#endif
+
+#ifndef MAX_LORA_TX_POWER
+  #define MAX_LORA_TX_POWER  30
+#endif
+
 #ifndef MAX_CONTACTS
   #define MAX_CONTACTS         100
 #endif
@@ -43,26 +63,28 @@
   #define OFFLINE_QUEUE_SIZE  16
 #endif
 
+#ifndef BLE_NAME_PREFIX
+  #define BLE_NAME_PREFIX  "MeshCore-"
+#endif
+
 #define SEND_TIMEOUT_BASE_MILLIS          500
 #define FLOOD_SEND_TIMEOUT_FACTOR         16.0f
 #define DIRECT_SEND_PERHOP_FACTOR         6.0f
 #define DIRECT_SEND_PERHOP_EXTRA_MILLIS   250
 
-#ifndef MAX_LORA_TX_POWER
-  #define MAX_LORA_TX_POWER  30
-#endif
+
 /*------------ Frame Protocol --------------*/
 
 #define  PUBLIC_GROUP_PSK  "izOH6cXN6mrJ5e26oRXNcg=="
 
-#define FIRMWARE_VER_CODE    2
+#define FIRMWARE_VER_CODE    3
 
 #ifndef FIRMWARE_BUILD_DATE
-  #define FIRMWARE_BUILD_DATE   "18 Mar 2025"
+  #define FIRMWARE_BUILD_DATE   "19 Mar 2025"
 #endif
 
 #ifndef FIRMWARE_VERSION
-  #define FIRMWARE_VERSION   "v1.3.0_fdl"
+  #define FIRMWARE_VERSION   "v1.4.0_fdl"
 #endif
 
 #define CMD_APP_START              1
@@ -97,6 +119,11 @@
 #define CMD_GET_CONTACT_BY_KEY    30
 #define CMD_GET_CHANNEL           31
 #define CMD_SET_CHANNEL           32
+#define CMD_SIGN_START            33
+#define CMD_SIGN_DATA             34
+#define CMD_SIGN_FINISH           35
+#define CMD_SEND_TRACE_PATH       36
+#define CMD_SET_DEVICE_PIN        37
 
 #define RESP_CODE_OK                0
 #define RESP_CODE_ERR               1
@@ -114,6 +141,11 @@
 #define RESP_CODE_DEVICE_INFO      13   // a reply to CMD_DEVICE_QEURY
 #define RESP_CODE_PRIVATE_KEY      14   // a reply to CMD_EXPORT_PRIVATE_KEY
 #define RESP_CODE_DISABLED         15
+#define RESP_CODE_CONTACT_MSG_RECV_V3  16   // a reply to CMD_SYNC_NEXT_MESSAGE (ver >= 3)
+#define RESP_CODE_CHANNEL_MSG_RECV_V3  17   // a reply to CMD_SYNC_NEXT_MESSAGE (ver >= 3)
+#define RESP_CODE_CHANNEL_INFO     18   // a reply to CMD_GET_CHANNEL
+#define RESP_CODE_SIGN_START       19
+#define RESP_CODE_SIGNATURE        20
 
 // these are _pushed_ to client app at any time
 #define PUSH_CODE_ADVERT            0x80
@@ -124,8 +156,17 @@
 #define PUSH_CODE_LOGIN_SUCCESS     0x85
 #define PUSH_CODE_LOGIN_FAIL        0x86
 #define PUSH_CODE_STATUS_RESPONSE   0x87
-//  ... _V3 stuff in here
-#define RESP_CODE_CHANNEL_INFO     18   // a reply to CMD_GET_CHANNEL
+#define PUSH_CODE_LOG_RX_DATA       0x88
+#define PUSH_CODE_TRACE_DATA        0x89
+
+#define ERR_CODE_UNSUPPORTED_CMD      1
+#define ERR_CODE_NOT_FOUND            2
+#define ERR_CODE_TABLE_FULL           3
+#define ERR_CODE_BAD_STATE            4
+#define ERR_CODE_FILE_IO_ERROR        5
+#define ERR_CODE_ILLEGAL_ARG          6
+
+#define MAX_SIGN_DATA_LEN    (8*1024)   // 8K
 
 /* -------------------------------------------------------------------------------------- */
 
@@ -142,6 +183,7 @@ struct NodePrefs {  // persisted to file
   uint8_t tx_power_dbm;
   uint8_t unused[3];
   float rx_delay_base;
+  uint32_t ble_pin;
 };
 
 class BaseCompanionRadioMesh : public BaseChatMesh {
@@ -159,6 +201,8 @@ protected:
   uint32_t _most_recent_lastmod;
   bool  _iter_started;
   uint8_t app_target_ver;
+  uint8_t* sign_data;
+  uint32_t sign_data_len;
   uint8_t cmd_frame[MAX_FRAME_SIZE+1];
   uint8_t out_frame[MAX_FRAME_SIZE+1];
   const char * _psk;
@@ -170,6 +214,14 @@ protected:
 
   int offline_queue_len;
   Frame offline_queue[OFFLINE_QUEUE_SIZE];
+
+  struct AckTableEntry {
+    unsigned long msg_sent;
+    uint32_t ack;
+  };
+  #define EXPECTED_ACK_TABLE_SIZE   8
+  AckTableEntry  expected_ack_table[EXPECTED_ACK_TABLE_SIZE];  // circular table
+  int next_ack_idx;
 
   void loadMainIdentity(mesh::RNG& trng) {
     if (!_identity_store->load("_main", self_id)) {
@@ -189,7 +241,7 @@ protected:
   int  getBlobByKey(const uint8_t key[], int key_len, uint8_t dest_buf[]) override;
   bool putBlobByKey(const uint8_t key[], int key_len, const uint8_t src_buf[], int len) override;
   void writeOKFrame();
-  void writeErrFrame();
+  void writeErrFrame(uint8_t err_code);
   void writeDisabledFrame();
   void writeContactRespFrame(uint8_t code, const ContactInfo& contact);
   void updateContactFromFrame(ContactInfo& contact, const uint8_t* frame, int len);
@@ -200,14 +252,9 @@ protected:
   NodePrefs _prefs;
   mesh::MainBoard* _board;
 
-  float getAirtimeBudgetFactor() const override {
-    return _prefs.airtime_factor;
-  }
-
-  int calcRxDelay(float score, uint32_t air_time) const override {
-    if (_prefs.rx_delay_base <= 0.0f) return 0;
-    return (int) ((pow(_prefs.rx_delay_base, 0.85f - score) - 1.0) * air_time);
-  }
+  float getAirtimeBudgetFactor() const override;
+  int calcRxDelay(float score, uint32_t air_time) const override;
+  void logRxRaw(float snr, float rssi, const uint8_t raw[], int len) override;
 
   uint32_t calcFloodTimeoutMillisFor(uint32_t pkt_airtime_millis) const override {
     return SEND_TIMEOUT_BASE_MILLIS + (FLOOD_SEND_TIMEOUT_FACTOR * pkt_airtime_millis);
@@ -220,15 +267,16 @@ protected:
   void onDiscoveredContact(ContactInfo& contact, bool is_new) override;
   void onContactPathUpdated(const ContactInfo& contact) override;
   bool processAck(const uint8_t *data) override;
-  void onMessageRecv(const ContactInfo& from, uint8_t path_len, uint32_t sender_timestamp, const char *text) override;
-  void onChannelMessageRecv(const mesh::GroupChannel& channel, int in_path_len, uint32_t timestamp, const char *text) override;
-  void onCommandDataRecv(const ContactInfo& from, uint8_t path_len, uint32_t sender_timestamp, const char *text) override;
-  void onSignedMessageRecv(const ContactInfo& from, uint8_t path_len, uint32_t sender_timestamp, const uint8_t *sender_prefix, const char *text) override;
+  void onMessageRecv(const ContactInfo& from, mesh::Packet* pkt, uint32_t sender_timestamp, const char *text) override;
+  void onChannelMessageRecv(const mesh::GroupChannel& channel, mesh::Packet* pkt, uint32_t timestamp, const char *text) override;
+  void onCommandDataRecv(const ContactInfo& from, mesh::Packet* pkt, uint32_t sender_timestamp, const char *text) override;
+  void onSignedMessageRecv(const ContactInfo& from, mesh::Packet* pkt, uint32_t sender_timestamp, const uint8_t *sender_prefix, const char *text) override;
   void onContactResponse(const ContactInfo& contact, const uint8_t* data, uint8_t len) override;
   void onRawDataRecv(mesh::Packet* packet) override;
-  void onSendTimeout() override;
+  void onTraceRecv(mesh::Packet* packet, uint32_t tag, uint32_t auth_code, uint8_t flags, const uint8_t* path_snrs, const uint8_t* path_hashes, uint8_t path_len) override;
+  void onSendTimeout() override {}
 
-  virtual void queueMessage(const ContactInfo& from, uint8_t txt_type, uint8_t path_len, uint32_t sender_timestamp, const uint8_t* extra, int extra_len, const char *text);
+  virtual void queueMessage(const ContactInfo& from, uint8_t txt_type, mesh::Packet* pkt, uint32_t sender_timestamp, const uint8_t* extra, int extra_len, const char *text);
   int getUnreadMsgNb() {return offline_queue_len;}
   virtual void onNextMsgSync() {};
 
@@ -244,16 +292,18 @@ public:
     app_target_ver = 0;
     _identity_store = NULL;
     pending_login = pending_status = 0;
+    next_ack_idx = 0;
+    sign_data = NULL;
 
     // defaults
     memset(&_prefs, 0, sizeof(_prefs));
     _prefs.airtime_factor = 1.0;    // one half
     strcpy(_prefs.node_name, "NONAME");
-    _prefs.freq = freq;
-    _prefs.sf = sf;
-    _prefs.bw = bw;
-    _prefs.cr = cr;
-    _prefs.tx_power_dbm = tx_power;
+    _prefs.freq = LORA_FREQ;
+    _prefs.sf = LORA_SF;
+    _prefs.bw = LORA_BW;
+    _prefs.cr = LORA_CR;
+    _prefs.tx_power_dbm = LORA_TX_POWER;
     //_prefs.rx_delay_base = 10.0f;  enable once new algo fixed
   }
 

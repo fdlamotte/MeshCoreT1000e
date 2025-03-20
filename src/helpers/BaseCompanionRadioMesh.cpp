@@ -167,10 +167,11 @@ void BaseCompanionRadioMesh::writeOKFrame() {
   buf[0] = RESP_CODE_OK;
   _serial->writeFrame(buf, 1);
 }
-void BaseCompanionRadioMesh::writeErrFrame() {
-  uint8_t buf[1];
+void BaseCompanionRadioMesh::writeErrFrame(uint8_t err_code) {
+  uint8_t buf[2];
   buf[0] = RESP_CODE_ERR;
-  _serial->writeFrame(buf, 1);
+  buf[1] = err_code;
+  _serial->writeFrame(buf, 2);
 }
 
 void BaseCompanionRadioMesh::writeDisabledFrame() {
@@ -239,6 +240,28 @@ void BaseCompanionRadioMesh::soundBuzzer() {
   // TODO
 }
 
+float BaseCompanionRadioMesh::getAirtimeBudgetFactor() const {
+  return _prefs.airtime_factor;
+}
+
+int BaseCompanionRadioMesh::calcRxDelay(float score, uint32_t air_time) const {
+  if (_prefs.rx_delay_base <= 0.0f) return 0;
+  return (int) ((pow(_prefs.rx_delay_base, 0.85f - score) - 1.0) * air_time);
+}
+
+void BaseCompanionRadioMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
+  if (_serial->isConnected()) {
+    int i = 0;
+    out_frame[i++] = PUSH_CODE_LOG_RX_DATA;
+    out_frame[i++] = (int8_t)(snr * 4);
+    out_frame[i++] = (int8_t)(rssi);
+    memcpy(&out_frame[i], raw, len); i += len;
+
+    _serial->writeFrame(out_frame, i);
+  }
+}
+
+
 void BaseCompanionRadioMesh::onDiscoveredContact(ContactInfo& contact, bool is_new) {
   if (_serial->isConnected()) {
     out_frame[0] = PUSH_CODE_ADVERT;
@@ -260,26 +283,35 @@ void BaseCompanionRadioMesh::onContactPathUpdated(const ContactInfo& contact) {
 }
 
 bool BaseCompanionRadioMesh::processAck(const uint8_t *data) {
-  // TODO: see if matches any in a table
-  if (memcmp(data, &expected_ack_crc, 4) == 0) {     // got an ACK from recipient
-    out_frame[0] = PUSH_CODE_SEND_CONFIRMED;
-    memcpy(&out_frame[1], data, 4);
-    uint32_t trip_time = _ms->getMillis() - last_msg_sent;
-    memcpy(&out_frame[5], &trip_time, 4);
-    _serial->writeFrame(out_frame, 9);
+    // see if matches any in a table
+    for (int i = 0; i < EXPECTED_ACK_TABLE_SIZE; i++) {
+      if (memcmp(data, &expected_ack_table[i].ack, 4) == 0) {     // got an ACK from recipient
+        out_frame[0] = PUSH_CODE_SEND_CONFIRMED;
+        memcpy(&out_frame[1], data, 4);
+        uint32_t trip_time = _ms->getMillis() - expected_ack_table[i].msg_sent;
+        memcpy(&out_frame[5], &trip_time, 4);
+        _serial->writeFrame(out_frame, 9);
 
-    // NOTE: the same ACK can be received multiple times!
-    expected_ack_crc = 0;  // reset our expected hash, now that we have received ACK
-    return true;
-  }
-  return checkConnectionsAck(data);
+        // NOTE: the same ACK can be received multiple times!
+        expected_ack_table[i].ack = 0;  // clear expected hash, now that we have received ACK
+        return true;
+      }
+    }
+    return checkConnectionsAck(data);
 }
 
-void BaseCompanionRadioMesh::queueMessage(const ContactInfo& from, uint8_t txt_type, uint8_t path_len, uint32_t sender_timestamp, const uint8_t* extra, int extra_len, const char *text) {
+void BaseCompanionRadioMesh::queueMessage(const ContactInfo& from, uint8_t txt_type, mesh::Packet* pkt, uint32_t sender_timestamp, const uint8_t* extra, int extra_len, const char *text) {
   int i = 0;
-  out_frame[i++] = RESP_CODE_CONTACT_MSG_RECV;
+  if (app_target_ver >= 3) {
+    out_frame[i++] = RESP_CODE_CONTACT_MSG_RECV_V3;
+    out_frame[i++] = (int8_t)(pkt->getSNR() * 4);
+    out_frame[i++] = 0;  // reserved1
+    out_frame[i++] = 0;  // reserved2
+  } else {
+    out_frame[i++] = RESP_CODE_CONTACT_MSG_RECV;
+  }
   memcpy(&out_frame[i], from.id.pub_key, 6); i += 6;  // just 6-byte prefix
-  out_frame[i++] = path_len;
+  uint8_t path_len = out_frame[i++] = pkt->isRouteFlood() ? pkt->path_len : 0xFF;
   out_frame[i++] = txt_type;
   memcpy(&out_frame[i], &sender_timestamp, 4); i += 4;
   if (extra_len > 0) {
@@ -301,27 +333,36 @@ void BaseCompanionRadioMesh::queueMessage(const ContactInfo& from, uint8_t txt_t
   }
 }
 
-void BaseCompanionRadioMesh::onMessageRecv(const ContactInfo& from, uint8_t path_len, uint32_t sender_timestamp, const char *text) {
+void BaseCompanionRadioMesh::onMessageRecv(const ContactInfo& from, mesh::Packet* pkt, uint32_t sender_timestamp, const char *text) {
   markConnectionActive(from);   // in case this is from a server, and we have a connection
-  queueMessage(from, TXT_TYPE_PLAIN, path_len, sender_timestamp, NULL, 0, text);
+  queueMessage(from, TXT_TYPE_PLAIN, pkt, sender_timestamp, NULL, 0, text);
 }
 
-void BaseCompanionRadioMesh::onCommandDataRecv(const ContactInfo& from, uint8_t path_len, uint32_t sender_timestamp, const char *text) {
+void BaseCompanionRadioMesh::onCommandDataRecv(const ContactInfo& from, mesh::Packet* pkt, uint32_t sender_timestamp, const char *text) {
   markConnectionActive(from);   // in case this is from a server, and we have a connection
-  queueMessage(from, TXT_TYPE_CLI_DATA, path_len, sender_timestamp, NULL, 0, text);
+  queueMessage(from, TXT_TYPE_CLI_DATA, pkt, sender_timestamp, NULL, 0, text);
 }
 
-void BaseCompanionRadioMesh::onSignedMessageRecv(const ContactInfo& from, uint8_t path_len, uint32_t sender_timestamp, const uint8_t *sender_prefix, const char *text) {
+void BaseCompanionRadioMesh::onSignedMessageRecv(const ContactInfo& from, mesh::Packet* pkt, uint32_t sender_timestamp, const uint8_t *sender_prefix, const char *text) {
   markConnectionActive(from);
   saveContacts();   // from.sync_since change needs to be persisted
-  queueMessage(from, TXT_TYPE_SIGNED_PLAIN, path_len, sender_timestamp, sender_prefix, 4, text);
+  queueMessage(from, TXT_TYPE_SIGNED_PLAIN, pkt, sender_timestamp, sender_prefix, 4, text);
 }
 
-void BaseCompanionRadioMesh::onChannelMessageRecv(const mesh::GroupChannel& channel, int in_path_len, uint32_t timestamp, const char *text) {
+void BaseCompanionRadioMesh::onChannelMessageRecv(const mesh::GroupChannel& channel, mesh::Packet* pkt, uint32_t timestamp, const char *text) {
   int i = 0;
-  out_frame[i++] = RESP_CODE_CHANNEL_MSG_RECV;
+  if (app_target_ver >= 3) {
+    out_frame[i++] = RESP_CODE_CHANNEL_MSG_RECV_V3;
+    out_frame[i++] = (int8_t)(pkt->getSNR() * 4);
+    out_frame[i++] = 0;  // reserved1
+    out_frame[i++] = 0;  // reserved2
+  } else {
+    out_frame[i++] = RESP_CODE_CHANNEL_MSG_RECV;
+  }
+
   out_frame[i++] = findChannelIdx(channel);
-  out_frame[i++] = in_path_len < 0 ? 0xFF : in_path_len;
+  uint8_t path_len = out_frame[i++] = pkt->isRouteFlood() ? pkt->path_len : 0xFF;
+
   out_frame[i++] = TXT_TYPE_PLAIN;
   memcpy(&out_frame[i], &timestamp, 4); i += 4;
   int tlen = strlen(text);   // TODO: UTF-8 ??
@@ -390,8 +431,23 @@ void BaseCompanionRadioMesh::onRawDataRecv(mesh::Packet* packet) {
   }
 }
 
+void BaseCompanionRadioMesh::onTraceRecv(mesh::Packet* packet, uint32_t tag, uint32_t auth_code, uint8_t flags, const uint8_t* path_snrs, const uint8_t* path_hashes, uint8_t path_len) {
+  int i = 0;
+  out_frame[i++] = PUSH_CODE_TRACE_DATA;
+  out_frame[i++] = 0;   // reserved
+  out_frame[i++] = path_len;
+  out_frame[i++] = flags;
+  memcpy(&out_frame[i], &tag, 4); i += 4;
+  memcpy(&out_frame[i], &auth_code, 4); i += 4;
+  memcpy(&out_frame[i], path_hashes, path_len); i += path_len;
+  memcpy(&out_frame[i], path_snrs, path_len); i += path_len;
+  out_frame[i++] = (int8_t)(_radio->getLastSNR() * 4);   // extra/final SNR (to this node)
 
-void BaseCompanionRadioMesh::onSendTimeout() {
+  if (_serial->isConnected()) {
+    _serial->writeFrame(out_frame, i);
+  } else {
+    MESH_DEBUG_PRINTLN("onTraceRecv(), data received while app offline");
+  }
 }
 
 void BaseCompanionRadioMesh::begin(FILESYSTEM& fs, mesh::RNG& trng) {
@@ -457,7 +513,7 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
     out_frame[i++] = FIRMWARE_VER_CODE;
     out_frame[i++] = MAX_CONTACTS / 2;        // v3+
     out_frame[i++] = MAX_GROUP_CHANNELS;      // v3+
-    memset(&out_frame[i], 0, 4); i += 4;  // reserved
+    memcpy(&out_frame[i], &_prefs.ble_pin, 4); i += 4;
     memset(&out_frame[i], 0, 12);
     strcpy((char *) &out_frame[i], FIRMWARE_BUILD_DATE); i += 12;
     StrHelper::strzcpy((char *) &out_frame[i], _board->getManufacturerName(), 40); i += 40;
@@ -508,26 +564,31 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
       uint32_t est_timeout;
       text[tlen] = 0;  // ensure null
       int result;
+      uint32_t expected_ack;
       if (txt_type == TXT_TYPE_CLI_DATA) {
         result = sendCommandData(*recipient, msg_timestamp, attempt, text, est_timeout);
-        expected_ack_crc = 0;  // no Ack expected
+        expected_ack = 0;  // no Ack expected
       } else {
-        result = sendMessage(*recipient, msg_timestamp, attempt, text, expected_ack_crc, est_timeout);
+        result = sendMessage(*recipient, msg_timestamp, attempt, text, expected_ack, est_timeout);
       }
       // TODO: add expected ACK to table
       if (result == MSG_SEND_FAILED) {
-        writeErrFrame();
+        writeErrFrame(ERR_CODE_TABLE_FULL);
       } else {
-        last_msg_sent = _ms->getMillis();
+        if (expected_ack) {
+          expected_ack_table[next_ack_idx].msg_sent = _ms->getMillis();  // add to circular table
+          expected_ack_table[next_ack_idx].ack = expected_ack;
+          next_ack_idx = (next_ack_idx + 1) % EXPECTED_ACK_TABLE_SIZE;
+        }
 
         out_frame[0] = RESP_CODE_SENT;
         out_frame[1] = (result == MSG_SEND_SENT_FLOOD) ? 1 : 0;
-        memcpy(&out_frame[2], &expected_ack_crc, 4);
+        memcpy(&out_frame[2], &expected_ack, 4);
         memcpy(&out_frame[6], &est_timeout, 4);
         _serial->writeFrame(out_frame, 10);
       }
     } else {
-      writeErrFrame(); // unknown recipient, or unsuported TXT_TYPE_*
+      writeErrFrame(recipient == NULL ? ERR_CODE_NOT_FOUND : ERR_CODE_UNSUPPORTED_CMD); // unknown recipient, or unsuported TXT_TYPE_*
     }
   } else if (cmd_frame[0] == CMD_SEND_CHANNEL_TXT_MSG) {  // send GroupChannel msg
     int i = 1;
@@ -537,16 +598,20 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
     memcpy(&msg_timestamp, &cmd_frame[i], 4); i += 4;
     const char *text = (char *) &cmd_frame[i];
 
-    ChannelDetails channel;
-    bool success = getChannel(channel_idx, channel);
-    if (success && txt_type == TXT_TYPE_PLAIN && sendGroupMessage(msg_timestamp, channel.channel, _prefs.node_name, text, len - i)) {
-      writeOKFrame();
+    if (txt_type != TXT_TYPE_PLAIN) {
+      writeErrFrame(ERR_CODE_UNSUPPORTED_CMD);
     } else {
-      writeErrFrame();
+      ChannelDetails channel;
+      bool success = getChannel(channel_idx, channel);
+      if (success && sendGroupMessage(msg_timestamp, channel.channel, _prefs.node_name, text, len - i)) {
+        writeOKFrame();
+      } else {
+        writeErrFrame(ERR_CODE_NOT_FOUND);  // bad channel_idx
+      }
     }
   } else if (cmd_frame[0] == CMD_GET_CONTACTS) {  // get Contact list
     if (_iter_started) {
-      writeErrFrame();   // iterator is currently busy
+      writeErrFrame(ERR_CODE_BAD_STATE);   // iterator is currently busy
     } else {
       if (len >= 5) {   // has optional 'since' param
         memcpy(&_iter_filter_since, &cmd_frame[1], 4);
@@ -585,7 +650,7 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
       savePrefs();
       writeOKFrame();
     } else {
-      writeErrFrame();  // invalid geo coordinate
+      writeErrFrame(ERR_CODE_ILLEGAL_ARG);  // invalid geo coordinate
     }
   } else if (cmd_frame[0] == CMD_GET_DEVICE_TIME) {
     uint8_t reply[5];
@@ -601,7 +666,7 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
       getRTCClock()->setCurrentTime(secs);
       writeOKFrame();
     } else {
-      writeErrFrame();
+      writeErrFrame(ERR_CODE_ILLEGAL_ARG);
     }
   } else if (cmd_frame[0] == CMD_SEND_SELF_ADVERT) {
     auto pkt = createSelfAdvert(_prefs.node_name, _prefs.node_lat, _prefs.node_lon);
@@ -613,7 +678,7 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
       }
       writeOKFrame();
     } else {
-      writeErrFrame();
+      writeErrFrame(ERR_CODE_TABLE_FULL);
     }
   } else if (cmd_frame[0] == CMD_RESET_PATH && len >= 1+32) {
     uint8_t* pub_key = &cmd_frame[1];
@@ -624,7 +689,7 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
       saveContacts();
       writeOKFrame();
     } else {
-      writeErrFrame();  // unknown contact
+      writeErrFrame(ERR_CODE_NOT_FOUND);  // unknown contact
     }
   } else if (cmd_frame[0] == CMD_ADD_UPDATE_CONTACT && len >= 1+32+2+1) {
     uint8_t* pub_key = &cmd_frame[1];
@@ -643,7 +708,7 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
         saveContacts();
         writeOKFrame();
       } else {
-        writeErrFrame();  // table is full!
+        writeErrFrame(ERR_CODE_TABLE_FULL);
       }
     }
   } else if (cmd_frame[0] == CMD_REMOVE_CONTACT) {
@@ -653,15 +718,19 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
       saveContacts();
       writeOKFrame();
     } else {
-      writeErrFrame();  // not found, or unable to remove
+      writeErrFrame(ERR_CODE_NOT_FOUND);  // not found, or unable to remove
     }
   } else if (cmd_frame[0] == CMD_SHARE_CONTACT) {
     uint8_t* pub_key = &cmd_frame[1];
     ContactInfo* recipient = lookupContactByPubKey(pub_key, PUB_KEY_SIZE);
-    if (recipient && shareContactZeroHop(*recipient)) {
-      writeOKFrame();
+    if (recipient) {
+      if (shareContactZeroHop(*recipient)) {
+        writeOKFrame();
+      } else {
+        writeErrFrame(ERR_CODE_TABLE_FULL);  // unable to send
+      }
     } else {
-      writeErrFrame();  // not found, or unable to send
+      writeErrFrame(ERR_CODE_NOT_FOUND);
     }
   } else if (cmd_frame[0] == CMD_GET_CONTACT_BY_KEY) {
     uint8_t* pub_key = &cmd_frame[1];
@@ -669,7 +738,7 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
     if (contact) {
       writeContactRespFrame(RESP_CODE_CONTACT, *contact);
     } else {
-      writeErrFrame();  // not found
+      writeErrFrame(ERR_CODE_NOT_FOUND);  // not found
     }
   } else if (cmd_frame[0] == CMD_EXPORT_CONTACT) {
     if (len < 1 + PUB_KEY_SIZE) {
@@ -681,7 +750,7 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
         releasePacket(pkt);  // undo the obtainNewPacket()
         _serial->writeFrame(out_frame, out_len + 1);
       } else {
-        writeErrFrame();  // Error
+        writeErrFrame(ERR_CODE_TABLE_FULL);  // Error
       }
     } else {
       uint8_t* pub_key = &cmd_frame[1];
@@ -691,19 +760,22 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
         out_frame[0] = RESP_CODE_EXPORT_CONTACT;
         _serial->writeFrame(out_frame, out_len + 1);
       } else {
-        writeErrFrame();  // not found
+        writeErrFrame(ERR_CODE_NOT_FOUND);  // not found
       }
     }
   } else if (cmd_frame[0] == CMD_IMPORT_CONTACT && len > 2+32+64) {
     if (importContact(&cmd_frame[1], len - 1)) {
       writeOKFrame();
     } else {
-      writeErrFrame();
+      writeErrFrame(ERR_CODE_ILLEGAL_ARG);
     }
   } else if (cmd_frame[0] == CMD_SYNC_NEXT_MESSAGE) {
     int out_len;
     if ((out_len = getFromOfflineQueue(out_frame)) > 0) {
       _serial->writeFrame(out_frame, out_len);
+      #ifdef HAS_UI
+        ui_task.msgRead(offline_queue_len);
+      #endif
     } else {
       out_frame[0] = RESP_CODE_NO_MORE_MESSAGES;
       _serial->writeFrame(out_frame, 1);
@@ -733,11 +805,11 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
       writeOKFrame();
     } else {
       MESH_DEBUG_PRINTLN("Error: CMD_SET_RADIO_PARAMS: f=%d, bw=%d, sf=%d, cr=%d", freq, bw, (uint32_t)sf, (uint32_t)cr);
-      writeErrFrame();
+      writeErrFrame(ERR_CODE_ILLEGAL_ARG);
     }
   } else if (cmd_frame[0] == CMD_SET_RADIO_TX_POWER) {
     if (cmd_frame[1] > MAX_LORA_TX_POWER) {
-      writeErrFrame();
+      writeErrFrame(ERR_CODE_ILLEGAL_ARG);
     } else {
       _prefs.tx_power_dbm = cmd_frame[1];
       savePrefs();
@@ -778,7 +850,7 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
         self_id = identity;
         writeOKFrame();
       } else {
-        writeErrFrame();
+        writeErrFrame(ERR_CODE_FILE_IO_ERROR);
       }
     #else
       writeDisabledFrame();
@@ -793,10 +865,10 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
         sendDirect(pkt, path, path_len);
         writeOKFrame();
       } else {
-        writeErrFrame();
+        writeErrFrame(ERR_CODE_TABLE_FULL);
       }
     } else {
-      writeErrFrame();  // flood, not supported (yet)
+      writeErrFrame(ERR_CODE_UNSUPPORTED_CMD);  // flood, not supported (yet)
     }
   } else if (cmd_frame[0] == CMD_SEND_LOGIN && len >= 1+PUB_KEY_SIZE) {
     uint8_t* pub_key = &cmd_frame[1];
@@ -807,7 +879,7 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
       uint32_t est_timeout;
       int result = sendLogin(*recipient, password, est_timeout);
       if (result == MSG_SEND_FAILED) {
-        writeErrFrame();
+        writeErrFrame(ERR_CODE_TABLE_FULL);
       } else {
         pending_status = 0;
         memcpy(&pending_login, recipient->id.pub_key, 4);  // match this to onContactResponse()
@@ -818,7 +890,7 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
         _serial->writeFrame(out_frame, 10);
       }
     } else {
-      writeErrFrame();  // contact not found
+      writeErrFrame(ERR_CODE_NOT_FOUND);  // contact not found
     }
   } else if (cmd_frame[0] == CMD_SEND_STATUS_REQ && len >= 1+PUB_KEY_SIZE) {
     uint8_t* pub_key = &cmd_frame[1];
@@ -827,7 +899,7 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
       uint32_t est_timeout;
       int result = sendStatusRequest(*recipient, est_timeout);
       if (result == MSG_SEND_FAILED) {
-        writeErrFrame();
+        writeErrFrame(ERR_CODE_TABLE_FULL);
       } else {
         pending_login = 0;
         memcpy(&pending_status, recipient->id.pub_key, 4);  // match this to onContactResponse()
@@ -838,14 +910,14 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
         _serial->writeFrame(out_frame, 10);
       }
     } else {
-      writeErrFrame();  // contact not found
+      writeErrFrame(ERR_CODE_NOT_FOUND);  // contact not found
     }
   } else if (cmd_frame[0] == CMD_HAS_CONNECTION && len >= 1+PUB_KEY_SIZE) {
     uint8_t* pub_key = &cmd_frame[1];
     if (hasConnectionTo(pub_key)) {
       writeOKFrame();
     } else {
-      writeErrFrame();
+      writeErrFrame(ERR_CODE_NOT_FOUND);
     }
   } else if (cmd_frame[0] == CMD_LOGOUT && len >= 1+PUB_KEY_SIZE) {
     uint8_t* pub_key = &cmd_frame[1];
@@ -862,10 +934,10 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
       memcpy(&out_frame[i], channel.channel.secret, 16); i += 16;   // NOTE: only 128-bit supported
       _serial->writeFrame(out_frame, i);
     } else {
-      writeErrFrame();
+      writeErrFrame(ERR_CODE_NOT_FOUND);
     }
   } else if (cmd_frame[0] == CMD_SET_CHANNEL && len >= 2+32+32) {
-    writeErrFrame();  // not supported (yet)
+    writeErrFrame(ERR_CODE_UNSUPPORTED_CMD);  // not supported (yet)
   } else if (cmd_frame[0] == CMD_SET_CHANNEL && len >= 2+32+16) {
     uint8_t channel_idx = cmd_frame[1];
     ChannelDetails channel;
@@ -876,10 +948,66 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
       saveChannels();
       writeOKFrame();
     } else {
-      writeErrFrame();
+      writeErrFrame(ERR_CODE_NOT_FOUND);  // bad channel_idx
     }
+  } else if (cmd_frame[0] == CMD_SIGN_START) {
+    out_frame[0] = RESP_CODE_SIGN_START;
+    out_frame[1] = 0;  // reserved
+    uint32_t len = MAX_SIGN_DATA_LEN;
+    memcpy(&out_frame[2], &len, 4);
+    _serial->writeFrame(out_frame, 6);
+
+    if (sign_data) {
+      free(sign_data);
+    }
+    sign_data = (uint8_t *) malloc(MAX_SIGN_DATA_LEN);
+    sign_data_len = 0;
+  } else if (cmd_frame[0] == CMD_SIGN_DATA && len > 1) {
+    if (sign_data == NULL || sign_data_len + (len - 1) > MAX_SIGN_DATA_LEN) {
+      writeErrFrame(sign_data == NULL ? ERR_CODE_BAD_STATE : ERR_CODE_TABLE_FULL);  // error: too long
+    } else {
+      memcpy(&sign_data[sign_data_len], &cmd_frame[1], len - 1);
+      sign_data_len += (len - 1);
+      writeOKFrame();
+    }
+  } else if (cmd_frame[0] == CMD_SIGN_FINISH) {
+    if (sign_data) {
+      self_id.sign(&out_frame[1], sign_data, sign_data_len);
+
+      free(sign_data);  // don't need sign_data now
+      sign_data = NULL;
+
+      out_frame[0] = RESP_CODE_SIGNATURE;
+      _serial->writeFrame(out_frame, 1 + SIGNATURE_SIZE);
+    } else {
+      writeErrFrame(ERR_CODE_BAD_STATE);
+    }
+  } else if (cmd_frame[0] == CMD_SEND_TRACE_PATH && len > 10 && len - 10 < MAX_PATH_SIZE) {
+    uint32_t tag, auth;
+    memcpy(&tag, &cmd_frame[1], 4);
+    memcpy(&auth, &cmd_frame[5], 4);
+    auto pkt = createTrace(tag, auth, cmd_frame[9]);
+    if (pkt) {
+      uint8_t path_len = len - 10;
+      sendDirect(pkt, &cmd_frame[10], path_len);
+
+      uint32_t t = _radio->getEstAirtimeFor(pkt->payload_len + pkt->path_len + 2);
+      uint32_t est_timeout = calcDirectTimeoutMillisFor(t, path_len);
+
+      out_frame[0] = RESP_CODE_SENT;
+      out_frame[1] = 0;
+      memcpy(&out_frame[2], &tag, 4);
+      memcpy(&out_frame[6], &est_timeout, 4);
+      _serial->writeFrame(out_frame, 10);
+    } else {
+      writeErrFrame(ERR_CODE_TABLE_FULL);
+    }
+  } else if (cmd_frame[0] == CMD_SET_DEVICE_PIN && len >= 5) {
+    memcpy(&_prefs.ble_pin, &cmd_frame[1], 4);
+    savePrefs();
+    writeOKFrame();
   } else {
-    writeErrFrame();
+    writeErrFrame(ERR_CODE_UNSUPPORTED_CMD);
     MESH_DEBUG_PRINTLN("ERROR: unknown command: %02X", cmd_frame[0]);
   }
 }
