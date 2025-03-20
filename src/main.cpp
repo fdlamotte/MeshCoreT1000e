@@ -239,7 +239,7 @@ void setup() {
   SPI.setPins(P_LORA_MISO, P_LORA_SCLK, P_LORA_MOSI);
   SPI.begin();
 
-  int status = radio.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, RADIOLIB_SX126X_SYNC_WORD_PRIVATE, LORA_TX_POWER, 8, tcxo);
+  int status = radio.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, RADIOLIB_LR11X0_LORA_SYNC_WORD_PRIVATE, LORA_TX_POWER, 8, tcxo);
   if (status != RADIOLIB_ERR_NONE) {
     Serial.print("ERROR: radio init failed: ");
     Serial.println(status);
@@ -247,6 +247,9 @@ void setup() {
   }
 
   radio.setCRC(0);
+
+  radio.setRxBoostedGainMode(true);
+
   fast_rng.begin(radio.random(0x7FFFFFFF));
   RadioNoiseListener trng(radio);
 
