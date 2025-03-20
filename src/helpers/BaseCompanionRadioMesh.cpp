@@ -261,7 +261,6 @@ void BaseCompanionRadioMesh::logRxRaw(float snr, float rssi, const uint8_t raw[]
   }
 }
 
-
 void BaseCompanionRadioMesh::onDiscoveredContact(ContactInfo& contact, bool is_new) {
   if (_serial->isConnected()) {
     out_frame[0] = PUSH_CODE_ADVERT;
@@ -463,21 +462,66 @@ void BaseCompanionRadioMesh::begin(FILESYSTEM& fs, mesh::RNG& trng) {
 
   loadMainIdentity(trng);
 
-  // load persisted prefs
-  if (_fs->exists("/node_prefs")) {
-    File file = _fs->open("/node_prefs");
-    if (file) {
-      file.read((uint8_t *) &_prefs, sizeof(_prefs));
-      file.close();
+    // load persisted prefs
+    if (_fs->exists("/node_prefs")) {
+      File file = _fs->open("/node_prefs");
+      if (file) {
+        uint8_t pad[8];
+
+        file.read((uint8_t *) &_prefs.airtime_factor, sizeof(float));  // 0
+        file.read((uint8_t *) _prefs.node_name, sizeof(_prefs.node_name));  // 4
+        file.read(pad, 4);   // 36
+        file.read((uint8_t *) &_prefs.node_lat, sizeof(_prefs.node_lat));  // 40
+        file.read((uint8_t *) &_prefs.node_lon, sizeof(_prefs.node_lon));  // 48
+        file.read((uint8_t *) &_prefs.freq, sizeof(_prefs.freq));   // 56
+        file.read((uint8_t *) &_prefs.sf, sizeof(_prefs.sf));  // 60
+        file.read((uint8_t *) &_prefs.cr, sizeof(_prefs.cr));  // 61
+        file.read((uint8_t *) &_prefs.reserved1, sizeof(_prefs.reserved1));  // 62
+        file.read((uint8_t *) &_prefs.reserved2, sizeof(_prefs.reserved2));  // 63
+        file.read((uint8_t *) &_prefs.bw, sizeof(_prefs.bw));  // 64
+        file.read((uint8_t *) &_prefs.tx_power_dbm, sizeof(_prefs.tx_power_dbm));  // 68
+        file.read((uint8_t *) _prefs.unused, sizeof(_prefs.unused));  // 69
+        file.read((uint8_t *) &_prefs.rx_delay_base, sizeof(_prefs.rx_delay_base));  // 72
+        file.read(pad, 4);   // 76
+        file.read((uint8_t *) &_prefs.ble_pin, sizeof(_prefs.ble_pin));  // 80
+
+        // sanitise bad pref values
+        _prefs.rx_delay_base = constrain(_prefs.rx_delay_base, 0, 20.0f);
+        _prefs.airtime_factor = constrain(_prefs.airtime_factor, 0, 9.0f);
+        _prefs.freq = constrain(_prefs.freq, 400.0f, 2500.0f);
+        _prefs.bw = constrain(_prefs.bw, 62.5f, 500.0f);
+        _prefs.sf = constrain(_prefs.sf, 7, 12);
+        _prefs.cr = constrain(_prefs.cr, 5, 8);
+        _prefs.tx_power_dbm = constrain(_prefs.tx_power_dbm, 1, MAX_LORA_TX_POWER);
+
+        file.close();
+      }
     }
-  }
 
-  // init 'blob store' support
-  _fs->mkdir("/bl");
+  #ifdef BLE_PIN_CODE
+    if (_prefs.ble_pin == 0) {
+    #ifdef HAS_UI
+      if (has_display) {
+        _active_ble_pin = trng.nextInt(100000, 999999);  // random pin each session
+      } else {
+        _active_ble_pin = BLE_PIN_CODE;  // otherwise static pin
+      }
+    #else
+      _active_ble_pin = BLE_PIN_CODE;  // otherwise static pin
+    #endif
+    } else {
+      _active_ble_pin = _prefs.ble_pin;
+    }
+  #else
+    _active_ble_pin = 0;
+  #endif
 
-  loadContacts();
-  addChannel("Public", PUBLIC_GROUP_PSK); // pre-configure Andy's public channel
-  loadChannels();
+    // init 'blob store' support
+    _fs->mkdir("/bl");
+
+    loadContacts();
+    addChannel("Public", PUBLIC_GROUP_PSK); // pre-configure Andy's public channel
+    loadChannels();
 
   _phy->setFrequency(_prefs.freq);
   _phy->setSpreadingFactor(_prefs.sf);

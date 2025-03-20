@@ -259,7 +259,7 @@ void setup() {
 
   char dev_name[32+10];
   sprintf(dev_name, "MeshCore-%s", the_mesh.getNodeName());
-  serial_interface.begin(dev_name, BLE_PIN_CODE);
+  serial_interface.begin(dev_name, the_mesh.getBLEPin());
 
   Bluefruit.setTxPower(-16);    // Check bluefruit.h for supported values
 

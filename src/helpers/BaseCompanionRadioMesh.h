@@ -199,6 +199,7 @@ protected:
   ContactsIterator _iter;
   uint32_t _iter_filter_since;
   uint32_t _most_recent_lastmod;
+  uint32_t _active_ble_pin;
   bool  _iter_started;
   uint8_t app_target_ver;
   uint8_t* sign_data;
@@ -309,6 +310,7 @@ public:
 
   void begin(FILESYSTEM& fs, mesh::RNG& trng);
   const char* getNodeName() { return _prefs.node_name; }
+  uint32_t getBLEPin() { return _active_ble_pin; }
   virtual void startInterface(BaseSerialInterface& serial);
   void savePrefs();
   virtual void handleCmdFrame(size_t len);
