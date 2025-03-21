@@ -9,6 +9,7 @@
   #include <SPIFFS.h>
 #endif
 
+#define RADIOLIB_STATIC_ONLY 1
 #include <RadioLib.h>
 #include <helpers/RadioLibWrappers.h>
 #include <helpers/ArduinoHelpers.h>
@@ -17,23 +18,8 @@
 #include <helpers/IdentityStore.h>
 #include <helpers/BaseSerialInterface.h>
 #include <RTClib.h>
+#include <target.h>
 
-#if defined(HELTEC_LORA_V3)
-  #include <helpers/CustomSX1262Wrapper.h>
-#elif defined(HELTEC_LORA_V2)
-  #include <helpers/CustomSX1276Wrapper.h>
-#elif defined(ARDUINO_XIAO_ESP32C3)
-  #include <helpers/CustomSX1262Wrapper.h>
-  #include <helpers/CustomSX1268Wrapper.h>
-#elif defined(SEEED_XIAO_S3) || defined(LILYGO_T3S3)
-  #include <helpers/CustomSX1262Wrapper.h>
-#elif defined(RAK_4631)
-  #include <helpers/CustomSX1262Wrapper.h>
-#elif defined(T1000_E)
-  #include <helpers/CustomLR1110Wrapper.h>
-#endif
-
-#include <helpers/BaseChatMesh.h>
 
 #ifndef LORA_FREQ
   #define LORA_FREQ   915.0
@@ -67,11 +53,11 @@
   #define BLE_NAME_PREFIX  "MeshCore-"
 #endif
 
+#include <helpers/BaseChatMesh.h>
 #define SEND_TIMEOUT_BASE_MILLIS          500
 #define FLOOD_SEND_TIMEOUT_FACTOR         16.0f
 #define DIRECT_SEND_PERHOP_FACTOR         6.0f
 #define DIRECT_SEND_PERHOP_EXTRA_MILLIS   250
-
 
 /*------------ Frame Protocol --------------*/
 

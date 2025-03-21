@@ -12,9 +12,6 @@
 #define USING_TIMER false
 #include "nRF52_PWM.h"
 
-#include <helpers/nrf52/T1000eBoard.h>
-#include <helpers/CustomLR1110Wrapper.h>
-
 #ifndef LORA_FREQ
   #define LORA_FREQ   915.0
 #endif
@@ -38,7 +35,6 @@
 
 #include <helpers/BaseCompanionRadioMesh.h>
 
-
 // Believe it or not, this std C function is busted on some platforms!
 static uint32_t _atoi(const char* sp) {
   uint32_t n = 0;
@@ -57,9 +53,7 @@ static uint32_t _atoi(const char* sp) {
   ArduinoSerialInterface serial_interface;
 #endif
 
-static T1000eBoard board;
 
-RADIO_CLASS radio = new Module(P_LORA_NSS, P_LORA_DIO_1, P_LORA_RESET, P_LORA_BUSY, SPI);
 StdRNG fast_rng;
 SimpleMeshTables tables;
 
@@ -226,50 +220,14 @@ void halt() {
   while (1) ;
 }
 
-const uint32_t rfswitch_dios[Module::RFSWITCH_MAX_PINS] = {
-  RADIOLIB_LR11X0_DIO5,
-  RADIOLIB_LR11X0_DIO6,
-  RADIOLIB_LR11X0_DIO7,
-  RADIOLIB_LR11X0_DIO8, 
-  RADIOLIB_NC
-};
-
-const Module::RfSwitchMode_t rfswitch_table[] = {
-  // mode                 DIO5  DIO6  DIO7  DIO8
-  { LR11x0::MODE_STBY,   {LOW,  LOW,  LOW,  LOW  }},  
-  { LR11x0::MODE_RX,     {HIGH, LOW,  LOW,  HIGH }},
-  { LR11x0::MODE_TX,     {HIGH, HIGH, LOW,  HIGH }},
-  { LR11x0::MODE_TX_HP,  {LOW,  HIGH, LOW,  HIGH }},
-  { LR11x0::MODE_TX_HF,  {LOW,  LOW,  LOW,  LOW  }}, 
-  { LR11x0::MODE_GNSS,   {LOW,  LOW,  HIGH, LOW  }},
-  { LR11x0::MODE_WIFI,   {LOW,  LOW,  LOW,  LOW  }},  
-  END_OF_MODE_TABLE,
-};
-
 void setup() {
 
   Serial.begin(115200);
   Serial1.begin(115200);
+
   board.begin();
 
-  // trying low power ...
-  sd_power_mode_set(NRF_POWER_MODE_LOWPWR);
-
-  float tcxo = LR11X0_DIO3_TCXO_VOLTAGE;
-
-  SPI.setPins(P_LORA_MISO, P_LORA_SCLK, P_LORA_MOSI);
-  SPI.begin();
-
-  int status = radio.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, RADIOLIB_LR11X0_LORA_SYNC_WORD_PRIVATE, LORA_TX_POWER, 8, tcxo);
-  if (status != RADIOLIB_ERR_NONE) {
-    Serial.print("ERROR: radio init failed: ");
-    Serial.println(status);
-    halt();
-  }
-
-  radio.setRfSwitchTable(rfswitch_dios, rfswitch_table);
-  radio.setRxBoostedGainMode(true);
-  radio.setCRC(0);
+  if (!radio_init()) { halt(); }
 
   fast_rng.begin(radio.random(0x7FFFFFFF));
   RadioNoiseListener trng(radio);
@@ -277,7 +235,7 @@ void setup() {
   InternalFS.begin();
   the_mesh.begin(InternalFS, trng);
 
-  char dev_name[32+10];
+  char dev_name[32+16];
   sprintf(dev_name, "MeshCore-%s", the_mesh.getNodeName());
   serial_interface.begin(dev_name, the_mesh.getBLEPin());
 
