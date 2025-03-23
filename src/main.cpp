@@ -64,6 +64,7 @@ class T1000eMesh : public BaseCompanionRadioMesh {
 
   enum {SLEEP=0, ACTIVE=1} state;
   uint32_t state_activation_time = 0;
+  uint32_t active_state_duration = 300 * 1000;
   bool gps_active;
 
 public:
@@ -111,7 +112,7 @@ public:
     if (state == SLEEP) {
       state = ACTIVE;
       //_serial->enable();
-      Bluefruit.Advertising.start(300);                // 0 = Don't stop advertising after n seconds 
+      Bluefruit.Advertising.start(0); 
     }
     state_activation_time = millis();
   }
@@ -134,7 +135,8 @@ public:
         return;
       }
 
-      if (millis() - state_activation_time > 300 * 1000) {
+      if ((active_state_duration > 0)
+        && (millis() - state_activation_time > active_state_duration)) {
         deactivate();
       }
       nextCheck = futureMillis(500);
