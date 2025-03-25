@@ -254,9 +254,9 @@ public:
     } else if (memcmp(command, "get ", 4) == 0) {
       const char* config = &command[4];
       if (memcmp(config, "blesleep", 9) == 0) {
-        sprintf(reply, "> %d", active_state_duration / 1000);
+        sprintf(reply, "%d", active_state_duration / 1000);
       } else if (memcmp(config, "gps", 3) == 0) {
-        sprintf(reply, "> %s", gps_active ? "on" : "off");
+        sprintf(reply, "%s", gps_active ? "on" : "off");
       }
     } else { // delegate to base cli
       sprintf(reply, "Unknown command %s", command);
