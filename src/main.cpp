@@ -35,6 +35,10 @@
 
 #include <helpers/BaseCompanionRadioMesh.h>
 
+
+#define CMD_CLI_COMMAND         50
+#define RESP_CODE_CLI_RESPONSE  50
+
 // Believe it or not, this std C function is busted on some platforms!
 static uint32_t _atoi(const char* sp) {
   uint32_t n = 0;
@@ -107,7 +111,14 @@ public:
   }
 
   void handleCmdFrame(size_t len) override {
-    BaseCompanionRadioMesh::handleCmdFrame(len);
+    if (cmd_frame[0] == CMD_CLI_COMMAND && len >= 2) {
+      cmd_frame[len] = 0;
+      out_frame[0] = RESP_CODE_CLI_RESPONSE;
+      handleCommand(0, (char*)&cmd_frame[1], (char *)&out_frame[1]);
+      _serial->writeFrame(out_frame, 1 + strlen((char*)&out_frame[1]));
+    } else {
+      BaseCompanionRadioMesh::handleCmdFrame(len);
+    }
     reactivate(); // get more cx time
   }
 
@@ -209,6 +220,22 @@ public:
     }
   }
 
+  void handleCommand(uint32_t timestamp, const char * command, char* reply) {
+    while (*command == ' ') command++;   // skip leading spaces
+
+    if (strlen(command) > 4 && command[2] == '|') {  // optional prefix (for companion radio CLI)
+      memcpy(reply, command, 3);  // reflect the prefix back
+      reply += 3;
+      command += 3;
+    }
+
+    if (memcmp(command, "hello", 5) == 0) {
+      sprintf(reply, "Hey");
+    } else { // delegate to base cli
+      sprintf(reply, "Unknown command %s", command);
+    }
+  }
+
   void loop() {
     BaseCompanionRadioMesh::loop();
     if (gps_active) gpsHandler();
@@ -249,11 +276,39 @@ void setup() {
   the_mesh.startInterface(serial_interface);
 
   // GPS Setup
-  //digitalWrite(GPS_EN, HIGH);
   nmea.begin();
 }
 
+void cli_loop() {
+  static char command[80];
+
+  int len = strlen(command);
+  while (Serial.available() && len < sizeof(command)-1) {
+    char c = Serial.read();
+    if (c != '\n') {
+      command[len++] = c;
+      command[len] = 0;
+    }
+    Serial.print(c);
+  }
+  if (len == sizeof(command)-1) {  // command buffer full
+    command[sizeof(command)-1] = '\r';
+  }
+
+  if (len > 0 && command[len - 1] == '\r') {  // received complete line
+    command[len - 1] = 0;  // replace newline with C string null terminator
+    char reply[160];
+    the_mesh.handleCommand(0, command, reply);  // NOTE: there is no sender_timestamp via serial!
+    if (reply[0]) {
+      Serial.print("  -> "); Serial.println(reply);
+    }
+
+    command[0] = 0;  // reset command buffer
+  }
+}
+
 void loop() {
+  cli_loop();
   the_mesh.loop();
   delay(1); // sync on tick
 }
