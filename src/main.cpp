@@ -53,6 +53,9 @@ static uint32_t _atoi(const char* sp) {
   ArduinoSerialInterface serial_interface;
 #endif
 
+#ifndef BLE_ACTIVE_STATE_DURATION
+  #define BLE_ACTIVE_STATE_DURATION (0)
+#endif
 
 StdRNG fast_rng;
 SimpleMeshTables tables;
@@ -64,7 +67,7 @@ class T1000eMesh : public BaseCompanionRadioMesh {
 
   enum {SLEEP=0, ACTIVE=1} state;
   uint32_t state_activation_time = 0;
-  uint32_t active_state_duration = 300 * 1000;
+  uint32_t active_state_duration = BLE_ACTIVE_STATE_DURATION * 1000;
   bool gps_active;
 
 public:
