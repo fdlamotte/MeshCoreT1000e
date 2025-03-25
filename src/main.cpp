@@ -229,8 +229,35 @@ public:
       command += 3;
     }
 
-    if (memcmp(command, "hello", 5) == 0) {
-      sprintf(reply, "Hey");
+    if (memcmp(command, "advert", 6) == 0) {
+      auto pkt = createSelfAdvert(_prefs.node_name, _prefs.node_lat, _prefs.node_lon);
+      sendZeroHop(pkt);
+      strcpy(reply, "OK - Advert sent");
+    } else if (memcmp(command, "floodadv", 8) == 0) {
+      auto pkt = createSelfAdvert(_prefs.node_name, _prefs.node_lat, _prefs.node_lon);
+      sendFlood(pkt);
+      strcpy(reply, "OK - Flood Advert sent");
+    } else if (memcmp(command, "set ", 4) == 0) {
+      const char* config = &command[4];
+      if (memcmp(config, "blesleep ", 9) == 0) {
+        active_state_duration = 1000 * atoi(&config[9]);
+        strcpy(reply, "OK");
+      } else if (memcmp(config, "gps ", 4) == 0) {
+        if (memcmp(&config[4], "on", 2) == 0) {
+          gps_active = true;
+          strcpy(reply, "GPS ON");
+        } else {
+          gps_active = false;
+          strcpy(reply, "GPS OFF");
+        }
+      }
+    } else if (memcmp(command, "get ", 4) == 0) {
+      const char* config = &command[4];
+      if (memcmp(config, "blesleep", 9) == 0) {
+        sprintf(reply, "> %d", active_state_duration / 1000);
+      } else if (memcmp(config, "gps", 3) == 0) {
+        sprintf(reply, "> %s", gps_active ? "on" : "off");
+      }
     } else { // delegate to base cli
       sprintf(reply, "Unknown command %s", command);
     }
