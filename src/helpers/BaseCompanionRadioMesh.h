@@ -66,11 +66,11 @@
 #define FIRMWARE_VER_CODE    3
 
 #ifndef FIRMWARE_BUILD_DATE
-  #define FIRMWARE_BUILD_DATE   "21 Mar 2025"
+  #define FIRMWARE_BUILD_DATE   "25 Mar 2025"
 #endif
 
 #ifndef FIRMWARE_VERSION
-  #define FIRMWARE_VERSION   "v1.4.0r_fdl"
+  #define FIRMWARE_VERSION   "v1.4.1_fdl"
 #endif
 
 #define CMD_APP_START              1
