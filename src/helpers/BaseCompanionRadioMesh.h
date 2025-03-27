@@ -299,6 +299,7 @@ public:
   uint32_t getBLEPin() { return _active_ble_pin; }
   virtual void startInterface(BaseSerialInterface& serial);
   void savePrefs();
+  void loadPrefsInt(const char* filename);
   virtual void handleCmdFrame(size_t len);
   void loop();
 };

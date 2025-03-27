@@ -118,6 +118,40 @@ void BaseCompanionRadioMesh::saveChannels() {
   }
 }
 
+void BaseCompanionRadioMesh::loadPrefsInt(const char* filename) {
+  File file = _fs->open(filename);
+  if (file) {
+    uint8_t pad[8];
+
+    file.read((uint8_t *) &_prefs.airtime_factor, sizeof(float));  // 0
+    file.read((uint8_t *) _prefs.node_name, sizeof(_prefs.node_name));  // 4
+    file.read(pad, 4);   // 36
+    file.read((uint8_t *) &_prefs.node_lat, sizeof(_prefs.node_lat));  // 40
+    file.read((uint8_t *) &_prefs.node_lon, sizeof(_prefs.node_lon));  // 48
+    file.read((uint8_t *) &_prefs.freq, sizeof(_prefs.freq));   // 56
+    file.read((uint8_t *) &_prefs.sf, sizeof(_prefs.sf));  // 60
+    file.read((uint8_t *) &_prefs.cr, sizeof(_prefs.cr));  // 61
+    file.read((uint8_t *) &_prefs.reserved1, sizeof(_prefs.reserved1));  // 62
+    file.read((uint8_t *) &_prefs.reserved2, sizeof(_prefs.reserved2));  // 63
+    file.read((uint8_t *) &_prefs.bw, sizeof(_prefs.bw));  // 64
+    file.read((uint8_t *) &_prefs.tx_power_dbm, sizeof(_prefs.tx_power_dbm));  // 68
+    file.read((uint8_t *) _prefs.unused, sizeof(_prefs.unused));  // 69
+    file.read((uint8_t *) &_prefs.rx_delay_base, sizeof(_prefs.rx_delay_base));  // 72
+    file.read(pad, 4);   // 76
+    file.read((uint8_t *) &_prefs.ble_pin, sizeof(_prefs.ble_pin));  // 80
+
+    // sanitise bad pref values
+    _prefs.rx_delay_base = constrain(_prefs.rx_delay_base, 0, 20.0f);
+    _prefs.airtime_factor = constrain(_prefs.airtime_factor, 0, 9.0f);
+    _prefs.freq = constrain(_prefs.freq, 400.0f, 2500.0f);
+    _prefs.bw = constrain(_prefs.bw, 62.5f, 500.0f);
+    _prefs.sf = constrain(_prefs.sf, 7, 12);
+    _prefs.cr = constrain(_prefs.cr, 5, 8);
+    _prefs.tx_power_dbm = constrain(_prefs.tx_power_dbm, 1, MAX_LORA_TX_POWER);
+
+    file.close();
+  }
+}
 
 int BaseCompanionRadioMesh::getBlobByKey(const uint8_t key[], int key_len, uint8_t dest_buf[]) {
   char path[64];
@@ -462,41 +496,14 @@ void BaseCompanionRadioMesh::begin(FILESYSTEM& fs, mesh::RNG& trng) {
 
   loadMainIdentity(trng);
 
-    // load persisted prefs
-    if (_fs->exists("/node_prefs")) {
-      File file = _fs->open("/node_prefs");
-      if (file) {
-        uint8_t pad[8];
-
-        file.read((uint8_t *) &_prefs.airtime_factor, sizeof(float));  // 0
-        file.read((uint8_t *) _prefs.node_name, sizeof(_prefs.node_name));  // 4
-        file.read(pad, 4);   // 36
-        file.read((uint8_t *) &_prefs.node_lat, sizeof(_prefs.node_lat));  // 40
-        file.read((uint8_t *) &_prefs.node_lon, sizeof(_prefs.node_lon));  // 48
-        file.read((uint8_t *) &_prefs.freq, sizeof(_prefs.freq));   // 56
-        file.read((uint8_t *) &_prefs.sf, sizeof(_prefs.sf));  // 60
-        file.read((uint8_t *) &_prefs.cr, sizeof(_prefs.cr));  // 61
-        file.read((uint8_t *) &_prefs.reserved1, sizeof(_prefs.reserved1));  // 62
-        file.read((uint8_t *) &_prefs.reserved2, sizeof(_prefs.reserved2));  // 63
-        file.read((uint8_t *) &_prefs.bw, sizeof(_prefs.bw));  // 64
-        file.read((uint8_t *) &_prefs.tx_power_dbm, sizeof(_prefs.tx_power_dbm));  // 68
-        file.read((uint8_t *) _prefs.unused, sizeof(_prefs.unused));  // 69
-        file.read((uint8_t *) &_prefs.rx_delay_base, sizeof(_prefs.rx_delay_base));  // 72
-        file.read(pad, 4);   // 76
-        file.read((uint8_t *) &_prefs.ble_pin, sizeof(_prefs.ble_pin));  // 80
-
-        // sanitise bad pref values
-        _prefs.rx_delay_base = constrain(_prefs.rx_delay_base, 0, 20.0f);
-        _prefs.airtime_factor = constrain(_prefs.airtime_factor, 0, 9.0f);
-        _prefs.freq = constrain(_prefs.freq, 400.0f, 2500.0f);
-        _prefs.bw = constrain(_prefs.bw, 62.5f, 500.0f);
-        _prefs.sf = constrain(_prefs.sf, 7, 12);
-        _prefs.cr = constrain(_prefs.cr, 5, 8);
-        _prefs.tx_power_dbm = constrain(_prefs.tx_power_dbm, 1, MAX_LORA_TX_POWER);
-
-        file.close();
-      }
-    }
+  // load persisted prefs
+  if (_fs->exists("/new_prefs")) {
+    loadPrefsInt("/new_prefs");   // new filename
+  } else if (_fs->exists("/node_prefs")) {
+    loadPrefsInt("/node_prefs");
+    savePrefs();  // save to new filename
+    _fs->remove("/node_prefs");  // remove old
+  }
 
   #ifdef BLE_PIN_CODE
     if (_prefs.ble_pin == 0) {
@@ -537,16 +544,35 @@ void BaseCompanionRadioMesh::startInterface(BaseSerialInterface& serial) {
 
 void BaseCompanionRadioMesh::savePrefs() {
 #if defined(NRF52_PLATFORM)
-  File file = _fs->open("/node_prefs", FILE_O_WRITE);
-  if (file) { file.seek(0); file.truncate(); }
+    File file = _fs->open("/new_prefs", FILE_O_WRITE);
+    if (file) { file.seek(0); file.truncate(); }
 #else
-  File file = _fs->open("/node_prefs", "w", true);
+    File file = _fs->open("/new_prefs", "w", true);
 #endif
-  if (file) {
-    file.write((const uint8_t *)&_prefs, sizeof(_prefs));
-    file.close();
+    if (file) {
+      uint8_t pad[8];
+      memset(pad, 0, sizeof(pad));
+
+      file.write((uint8_t *) &_prefs.airtime_factor, sizeof(float));  // 0
+      file.write((uint8_t *) _prefs.node_name, sizeof(_prefs.node_name));  // 4
+      file.write(pad, 4);   // 36
+      file.write((uint8_t *) &_prefs.node_lat, sizeof(_prefs.node_lat));  // 40
+      file.write((uint8_t *) &_prefs.node_lon, sizeof(_prefs.node_lon));  // 48
+      file.write((uint8_t *) &_prefs.freq, sizeof(_prefs.freq));   // 56
+      file.write((uint8_t *) &_prefs.sf, sizeof(_prefs.sf));  // 60
+      file.write((uint8_t *) &_prefs.cr, sizeof(_prefs.cr));  // 61
+      file.write((uint8_t *) &_prefs.reserved1, sizeof(_prefs.reserved1));  // 62
+      file.write((uint8_t *) &_prefs.reserved2, sizeof(_prefs.reserved2));  // 63
+      file.write((uint8_t *) &_prefs.bw, sizeof(_prefs.bw));  // 64
+      file.write((uint8_t *) &_prefs.tx_power_dbm, sizeof(_prefs.tx_power_dbm));  // 68
+      file.write((uint8_t *) _prefs.unused, sizeof(_prefs.unused));  // 69
+      file.write((uint8_t *) &_prefs.rx_delay_base, sizeof(_prefs.rx_delay_base));  // 72
+      file.write(pad, 4);   // 76
+      file.write((uint8_t *) &_prefs.ble_pin, sizeof(_prefs.ble_pin));  // 80
+
+      file.close();
+    }
   }
-}
 
 void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
   if (cmd_frame[0] == CMD_DEVICE_QEURY && len >= 2) {  // sent when app establishes connection
