@@ -73,6 +73,7 @@ class T1000eMesh : public BaseCompanionRadioMesh {
   uint32_t state_activation_time = 0;
   uint32_t active_state_duration = BLE_ACTIVE_STATE_DURATION * 1000;
   bool gps_active;
+  bool _repeat_en = false;
 
 public:
   T1000eMesh(RADIO_CLASS& phy, RadioLibWrapper& rw, mesh::RNG& rng, mesh::RTCClock& rtc, SimpleMeshTables& tables, LocationProvider& nmea)
@@ -80,7 +81,11 @@ public:
      _nmea(&nmea), _pwm(nRF52_PWM(LED_PIN, 1000.0f, 100.0f)), state{SLEEP}, state_activation_time(millis()), 
      gps_active(false) {
 
-     }
+  }
+
+  bool allowPacketForward(const mesh::Packet* packet) override {
+    return _repeat_en;
+  }
 
   void ledHandler() {
     static long next_led_update = 0;
@@ -242,21 +247,37 @@ public:
       if (memcmp(config, "blesleep ", 9) == 0) {
         active_state_duration = 1000 * atoi(&config[9]);
         strcpy(reply, "OK");
+      } else if (memcmp(config, "pin ", 4) == 0) {
+        _prefs.ble_pin = atoi(&config[4]);
+        savePrefs();
+        sprintf(reply, "> ble pin set to %d", _prefs.ble_pin);
       } else if (memcmp(config, "gps ", 4) == 0) {
         if (memcmp(&config[4], "on", 2) == 0) {
           gps_active = true;
-          strcpy(reply, "GPS ON");
+          strcpy(reply, "> gps on");
         } else {
           gps_active = false;
-          strcpy(reply, "GPS OFF");
+          strcpy(reply, "> gps off");
+        }
+      } else if (memcmp(config, "repeat ", 7) == 0) {
+        if (memcmp(&config[7], "on", 2) == 0) {
+          _repeat_en = true;
+          strcpy(reply, "> repeat on");
+        } else {
+          _repeat_en = false;
+          strcpy(reply, "> repeat off");
         }
       }
     } else if (memcmp(command, "get ", 4) == 0) {
       const char* config = &command[4];
       if (memcmp(config, "blesleep", 9) == 0) {
-        sprintf(reply, "%d", active_state_duration / 1000);
+        sprintf(reply, "> blesleep = %d", active_state_duration / 1000);
       } else if (memcmp(config, "gps", 3) == 0) {
-        sprintf(reply, "%s", gps_active ? "on" : "off");
+        sprintf(reply, "> gps %s", gps_active ? "on" : "off");
+      } else if (memcmp(config, "repeat", 6) == 0) {
+        sprintf(reply, "> repeat %s", _repeat_en ? "on" : "off");
+      } else if (memcmp(config, "pin", 3) == 0) {
+        sprintf(reply, "> prefs ble pin %d, active ble pin %d", _prefs.ble_pin, _active_ble_pin);
       }
     } else { // delegate to base cli
       sprintf(reply, "Unknown command %s", command);
