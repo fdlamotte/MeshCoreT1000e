@@ -61,6 +61,9 @@ static uint32_t _atoi(const char* sp) {
   #define BLE_ACTIVE_STATE_DURATION (0)
 #endif
 
+#define BATTERY_POINT 12 
+static const int Battery_Level_Percent_Table[BATTERY_POINT] = {3200, 3590, 3650, 3700, 3740, 3760, 3795, 3840, 3910, 3980, 4070, 4150};
+
 StdRNG fast_rng;
 SimpleMeshTables tables;
 
@@ -74,13 +77,16 @@ class T1000eMesh : public BaseCompanionRadioMesh {
   uint32_t active_state_duration = BLE_ACTIVE_STATE_DURATION * 1000;
   bool gps_active;
   bool _repeat_en = false;
+  
+  unsigned int last_uptime = 0;
+  unsigned int activation_time;
 
 public:
   T1000eMesh(RADIO_CLASS& phy, RadioLibWrapper& rw, mesh::RNG& rng, mesh::RTCClock& rtc, SimpleMeshTables& tables, LocationProvider& nmea)
      : BaseCompanionRadioMesh(phy, rw, rng, rtc, tables, board, PUBLIC_GROUP_PSK, LORA_FREQ, LORA_SF, LORA_BW, LORA_CR, LORA_TX_POWER), 
      _nmea(&nmea), _pwm(nRF52_PWM(LED_PIN, 1000.0f, 100.0f)), state{SLEEP}, state_activation_time(millis()), 
-     gps_active(false) {
-
+      gps_active(false) {
+      activation_time = millis();
   }
 
   bool allowPacketForward(const mesh::Packet* packet) override {
@@ -198,12 +204,46 @@ public:
     }
   }
 
+  void start_gps() {
+    gps_active = true;
+    //_nmea->begin();
+    // this init sequence should be better 
+    // comes from seeed examples and deals with all gps pins
+    pinMode(GPS_EN, OUTPUT);
+    digitalWrite(GPS_EN, HIGH);
+    delay(10);
+    pinMode(GPS_VRTC_EN, OUTPUT);
+    digitalWrite(GPS_VRTC_EN, HIGH);
+    delay(10);
+         
+    pinMode(GPS_RESET, OUTPUT);
+    digitalWrite(GPS_RESET, HIGH);
+    delay(10);
+    digitalWrite(GPS_RESET, LOW);
+         
+    pinMode(GPS_SLEEP_INT, OUTPUT);
+    digitalWrite(GPS_SLEEP_INT, HIGH);
+    pinMode(GPS_RTC_INT, OUTPUT);
+    digitalWrite(GPS_RTC_INT, LOW);
+    pinMode(GPS_RESETB, INPUT_PULLUP);
+  }
+
+  void stop_gps() {
+    digitalWrite(GPS_VRTC_EN, HIGH);
+    digitalWrite(GPS_RESET, HIGH);
+    digitalWrite(GPS_SLEEP_INT, HIGH);
+    digitalWrite(GPS_RTC_INT, LOW);
+    pinMode(GPS_RESETB, OUTPUT);
+    digitalWrite(GPS_RESETB, LOW);
+    //_nmea->stop();
+  }
+
   void toggleGps() {
     gps_active = !gps_active;
     if (gps_active) {
-      _nmea->begin();
+      start_gps();
     } else {
-      _nmea->stop();
+      stop_gps();
     }
   }
 
@@ -225,6 +265,26 @@ public:
     }
   }
 
+  // function from seeed t1000 examples ...
+  uint8_t bat_vol_to_percentage(uint16_t voltage) {                  
+      if (voltage < Battery_Level_Percent_Table[0]) {              
+          return 0;  
+      }
+
+      if (voltage < Battery_Level_Percent_Table[1]) {              
+          return 0 + (20UL * (int)(voltage - Battery_Level_Percent_Table[0])) /
+                         (int)(Battery_Level_Percent_Table[1] - Battery_Level_Percent_Table[0]);
+      }
+
+      for (uint8_t i = 0; i < BATTERY_POINT; i++) {              
+          if (voltage < Battery_Level_Percent_Table[i]) {          
+              return 20 + (8 * (i - 2)) + (8UL * (int)(voltage - Battery_Level_Percent_Table[i - 1])) / (int)(Battery_Level_Percent_Table[i] - Battery_Level_Percent_Table[i - 1]);
+          }   
+      }
+                     
+      return 100;    
+  }
+
   void handleCommand(uint32_t timestamp, const char * command, char* reply) {
     while (*command == ' ') command++;   // skip leading spaces
 
@@ -242,45 +302,79 @@ public:
       auto pkt = createSelfAdvert(_prefs.node_name, _prefs.node_lat, _prefs.node_lon);
       sendFlood(pkt);
       strcpy(reply, "OK - Flood Advert sent");
+    } else if (memcmp(command, "uptime", 6) == 0) {
+      unsigned int uptime = (millis() - activation_time) / 1000;
+      sprintf(reply, "uptime : %dh %dm %ds, last : %dh %dm",
+      uptime / 3600, (uptime % 3600) / 60, uptime % 60,
+      last_uptime / 3600, (last_uptime % 3600) / 60);
+    } else if (memcmp(command, "bat", 3) == 0) {
+      int v = _board->getBattMilliVolts();
+      int p = bat_vol_to_percentage(v);
+      sprintf(reply, "Bat: %0.2fV/%d%%", ((double)v)/1000., p);
+    } else if (memcmp(command, "pinval ", 7) == 0) {
+      sprintf(reply, "value : %s", digitalRead(atoi(&command[7])) == HIGH ? "HIGH" : "LOW");
+    } else if (memcmp(command, "gps_sync", 8) == 0) {
+      gps_time_sync_needed = true;
+      if (gps_active) {
+        strcpy(reply, "ok");
+      } else {
+        strcpy(reply, "Don't forget to activate gps");
+      }
     } else if (memcmp(command, "set ", 4) == 0) {
       const char* config = &command[4];
       if (memcmp(config, "blesleep ", 9) == 0) {
         active_state_duration = 1000 * atoi(&config[9]);
-        strcpy(reply, "OK");
+        strcpy(reply, "ok");
       } else if (memcmp(config, "pin ", 4) == 0) {
         _prefs.ble_pin = atoi(&config[4]);
         savePrefs();
-        sprintf(reply, "> ble pin set to %d", _prefs.ble_pin);
+        sprintf(reply, "ble pin set to %d", _prefs.ble_pin);
       } else if (memcmp(config, "gps ", 4) == 0) {
         if (memcmp(&config[4], "on", 2) == 0) {
           gps_active = true;
-          strcpy(reply, "> gps on");
+          strcpy(reply, "gps on");
         } else {
           gps_active = false;
-          strcpy(reply, "> gps off");
+          strcpy(reply, "gps off");
         }
       } else if (memcmp(config, "repeat ", 7) == 0) {
         if (memcmp(&config[7], "on", 2) == 0) {
           _repeat_en = true;
-          strcpy(reply, "> repeat on");
+          strcpy(reply, "repeat on");
         } else {
           _repeat_en = false;
-          strcpy(reply, "> repeat off");
+          strcpy(reply, "repeat off");
         }
       }
     } else if (memcmp(command, "get ", 4) == 0) {
       const char* config = &command[4];
       if (memcmp(config, "blesleep", 9) == 0) {
-        sprintf(reply, "> blesleep = %d", active_state_duration / 1000);
+        sprintf(reply, "blesleep = %d", active_state_duration / 1000);
       } else if (memcmp(config, "gps", 3) == 0) {
-        sprintf(reply, "> gps %s", gps_active ? "on" : "off");
+        sprintf(reply, "gps %s", gps_active ? "on" : "off");
       } else if (memcmp(config, "repeat", 6) == 0) {
-        sprintf(reply, "> repeat %s", _repeat_en ? "on" : "off");
+        sprintf(reply, "repeat %s", _repeat_en ? "on" : "off");
       } else if (memcmp(config, "pin", 3) == 0) {
-        sprintf(reply, "> prefs ble pin %d, active ble pin %d", _prefs.ble_pin, _active_ble_pin);
+        sprintf(reply, "prefs ble pin %d, active ble pin %d", _prefs.ble_pin, _active_ble_pin);
       }
     } else { // delegate to base cli
       sprintf(reply, "Unknown command %s", command);
+    }
+  }
+
+  void begin(FILESYSTEM& fs, mesh::RNG& trng) override {
+    BaseCompanionRadioMesh::begin(fs, trng);
+    if (_fs->exists("uptime")) {
+      _fs->rename("uptime", "last_uptime");
+      File file = _fs->open("last_uptime");
+      if (file) {
+        file.read((uint8_t*) &last_uptime, sizeof(last_uptime));
+        file.close();
+      }
+    }
+
+    if (gps_active) {
+      _nmea->begin();
     }
   }
 
@@ -290,6 +384,20 @@ public:
     buttonHandler();
     ledHandler();
     stateHandler();
+    
+    static int next_uptime_write = 0;
+    if (millisHasNowPassed(next_uptime_write)) {
+      unsigned int uptime = (millis() - activation_time) / 1000;
+      File file = _fs->open("uptime", FILE_O_WRITE);
+      if (file) { 
+        file.seek(0); 
+        file.truncate();
+        file.write((uint8_t*) &uptime, sizeof(uptime));
+        file.close();
+      }
+      
+      next_uptime_write = futureMillis(60*1000); // every minute
+    }
   }
 };
 
@@ -307,6 +415,14 @@ void setup() {
 
   board.begin();
 
+  // make sure gps pin are off
+  digitalWrite(GPS_VRTC_EN, LOW);
+  digitalWrite(GPS_RESET, LOW);
+  digitalWrite(GPS_SLEEP_INT, LOW);
+  digitalWrite(GPS_RTC_INT, LOW);
+  pinMode(GPS_RESETB, OUTPUT);
+  digitalWrite(GPS_RESETB, LOW);
+
   if (!radio_init()) { halt(); }
 
   fast_rng.begin(radio.random(0x7FFFFFFF));
@@ -323,8 +439,6 @@ void setup() {
 
   the_mesh.startInterface(serial_interface);
 
-  // GPS Setup
-  nmea.begin();
 }
 
 void cli_loop() {

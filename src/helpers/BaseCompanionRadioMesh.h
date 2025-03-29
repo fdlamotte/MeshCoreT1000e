@@ -294,7 +294,7 @@ public:
     //_prefs.rx_delay_base = 10.0f;  enable once new algo fixed
   }
 
-  void begin(FILESYSTEM& fs, mesh::RNG& trng);
+  virtual void begin(FILESYSTEM& fs, mesh::RNG& trng);
   const char* getNodeName() { return _prefs.node_name; }
   uint32_t getBLEPin() { return _active_ble_pin; }
   virtual void startInterface(BaseSerialInterface& serial);
