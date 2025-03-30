@@ -284,7 +284,7 @@ int BaseCompanionRadioMesh::calcRxDelay(float score, uint32_t air_time) const {
 }
 
 void BaseCompanionRadioMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
-  if (_serial->isConnected()) {
+  if (_serial->isConnected() && len+3 <= MAX_FRAME_SIZE) {
     int i = 0;
     out_frame[i++] = PUSH_CODE_LOG_RX_DATA;
     out_frame[i++] = (int8_t)(snr * 4);
@@ -483,7 +483,7 @@ void BaseCompanionRadioMesh::onTraceRecv(mesh::Packet* packet, uint32_t tag, uin
   }
 }
 
-void BaseCompanionRadioMesh::begin(FILESYSTEM& fs, mesh::RNG& trng) {
+void BaseCompanionRadioMesh::begin(FILESYSTEM& fs) {
   _fs = &fs;
 
   BaseChatMesh::begin();
@@ -494,7 +494,7 @@ void BaseCompanionRadioMesh::begin(FILESYSTEM& fs, mesh::RNG& trng) {
   _identity_store = new IdentityStore(fs, "/identity");
 #endif
 
-  loadMainIdentity(trng);
+  loadMainIdentity();
 
   // load persisted prefs
   if (_fs->exists("/new_prefs")) {
@@ -523,18 +523,15 @@ void BaseCompanionRadioMesh::begin(FILESYSTEM& fs, mesh::RNG& trng) {
     _active_ble_pin = 0;
   #endif
 
-    // init 'blob store' support
-    _fs->mkdir("/bl");
+  // init 'blob store' support
+  _fs->mkdir("/bl");
 
-    loadContacts();
-    addChannel("Public", PUBLIC_GROUP_PSK); // pre-configure Andy's public channel
-    loadChannels();
+  loadContacts();
+  addChannel("Public", PUBLIC_GROUP_PSK); // pre-configure Andy's public channel
+  loadChannels();
 
-  _phy->setFrequency(_prefs.freq);
-  _phy->setSpreadingFactor(_prefs.sf);
-  _phy->setBandwidth(_prefs.bw);
-  _phy->setCodingRate(_prefs.cr);
-  _phy->setOutputPower(_prefs.tx_power_dbm);
+  radio_set_params(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
+  radio_set_tx_power(_prefs.tx_power_dbm);
 }
 
 void BaseCompanionRadioMesh::startInterface(BaseSerialInterface& serial) {
@@ -866,10 +863,7 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
       _prefs.bw = (float)bw / 1000.0;
       savePrefs();
 
-      _phy->setFrequency(_prefs.freq);
-      _phy->setSpreadingFactor(_prefs.sf);
-      _phy->setBandwidth(_prefs.bw);
-      _phy->setCodingRate(_prefs.cr);
+      radio_set_params(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
       MESH_DEBUG_PRINTLN("OK: CMD_SET_RADIO_PARAMS: f=%d, bw=%d, sf=%d, cr=%d", freq, bw, (uint32_t)sf, (uint32_t)cr);
 
       writeOKFrame();
@@ -883,7 +877,7 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
     } else {
       _prefs.tx_power_dbm = cmd_frame[1];
       savePrefs();
-      _phy->setOutputPower(_prefs.tx_power_dbm);
+      radio_set_tx_power(_prefs.tx_power_dbm);
       writeOKFrame();
     }
   } else if (cmd_frame[0] == CMD_SET_TUNING_PARAMS) {

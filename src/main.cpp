@@ -82,8 +82,8 @@ class T1000eMesh : public BaseCompanionRadioMesh {
   unsigned int activation_time;
 
 public:
-  T1000eMesh(RADIO_CLASS& phy, RadioLibWrapper& rw, mesh::RNG& rng, mesh::RTCClock& rtc, SimpleMeshTables& tables, LocationProvider& nmea)
-     : BaseCompanionRadioMesh(phy, rw, rng, rtc, tables, board, PUBLIC_GROUP_PSK, LORA_FREQ, LORA_SF, LORA_BW, LORA_CR, LORA_TX_POWER), 
+  T1000eMesh(mesh::Radio& radio, mesh::RNG& rng, mesh::RTCClock& rtc, SimpleMeshTables& tables, LocationProvider& nmea)
+     : BaseCompanionRadioMesh(radio, rng, rtc, tables, board, PUBLIC_GROUP_PSK, LORA_FREQ, LORA_SF, LORA_BW, LORA_CR, LORA_TX_POWER), 
      _nmea(&nmea), _pwm(nRF52_PWM(LED_PIN, 1000.0f, 100.0f)), state{SLEEP}, state_activation_time(millis()), 
       gps_active(false) {
       activation_time = millis();
@@ -345,6 +345,9 @@ public:
           _repeat_en = false;
           strcpy(reply, "repeat off");
         }
+      } else if (memcmp(config, "ble_tx ", 7) == 0) {
+        Bluefruit.setTxPower(atoi(&config[7]));
+        sprintf(reply, "ble tx power %d", Bluefruit.getTxPower());
       }
     } else if (memcmp(command, "get ", 4) == 0) {
       const char* config = &command[4];
@@ -356,14 +359,16 @@ public:
         sprintf(reply, "repeat %s", _repeat_en ? "on" : "off");
       } else if (memcmp(config, "pin", 3) == 0) {
         sprintf(reply, "prefs ble pin %d, active ble pin %d", _prefs.ble_pin, _active_ble_pin);
+      } else if (memcmp(config, "ble_tx", 6) == 0) {
+        sprintf(reply, "ble tx power %d", Bluefruit.getTxPower());
       }
     } else { // delegate to base cli
       sprintf(reply, "Unknown command %s", command);
     }
   }
 
-  void begin(FILESYSTEM& fs, mesh::RNG& trng) override {
-    BaseCompanionRadioMesh::begin(fs, trng);
+  void begin(FILESYSTEM& fs) override {
+    BaseCompanionRadioMesh::begin(fs);
     if (_fs->exists("uptime")) {
       _fs->rename("uptime", "last_uptime");
       File file = _fs->open("last_uptime");
@@ -402,7 +407,7 @@ public:
 };
 
 MicroNMEALocationProvider nmea = MicroNMEALocationProvider(Serial1);
-T1000eMesh the_mesh(radio, *new WRAPPER_CLASS(radio, board), fast_rng, *new VolatileRTCClock(), tables, nmea);
+T1000eMesh the_mesh(radio_driver, fast_rng, *new VolatileRTCClock(), tables, nmea);
 
 void halt() {
   while (1) ;
@@ -425,11 +430,10 @@ void setup() {
 
   if (!radio_init()) { halt(); }
 
-  fast_rng.begin(radio.random(0x7FFFFFFF));
-  RadioNoiseListener trng(radio);
+  fast_rng.begin(radio_get_rng_seed());
 
   InternalFS.begin();
-  the_mesh.begin(InternalFS, trng);
+  the_mesh.begin(InternalFS);
 
   char dev_name[32+16];
   sprintf(dev_name, "MeshCore-%s", the_mesh.getNodeName());

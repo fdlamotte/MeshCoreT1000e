@@ -9,9 +9,6 @@
   #include <SPIFFS.h>
 #endif
 
-#define RADIOLIB_STATIC_ONLY 1
-#include <RadioLib.h>
-#include <helpers/RadioLibWrappers.h>
 #include <helpers/ArduinoHelpers.h>
 #include <helpers/StaticPoolPacketManager.h>
 #include <helpers/SimpleMeshTables.h>
@@ -66,11 +63,11 @@
 #define FIRMWARE_VER_CODE    3
 
 #ifndef FIRMWARE_BUILD_DATE
-  #define FIRMWARE_BUILD_DATE   "27 Mar 2025"
+  #define FIRMWARE_BUILD_DATE   "30 Mar 2025"
 #endif
 
 #ifndef FIRMWARE_VERSION
-  #define FIRMWARE_VERSION   "v1.4.1_fdl"
+  #define FIRMWARE_VERSION   "v1.4.2_fdl"
 #endif
 
 #define CMD_APP_START              1
@@ -175,7 +172,6 @@ struct NodePrefs {  // persisted to file
 class BaseCompanionRadioMesh : public BaseChatMesh {
 protected:
   FILESYSTEM* _fs;
-  RADIO_CLASS* _phy;
   IdentityStore* _identity_store;
   uint32_t expected_ack_crc;  // TODO: keep table of expected ACKs
   uint32_t pending_login;
@@ -210,9 +206,9 @@ protected:
   AckTableEntry  expected_ack_table[EXPECTED_ACK_TABLE_SIZE];  // circular table
   int next_ack_idx;
 
-  void loadMainIdentity(mesh::RNG& trng) {
+  void loadMainIdentity() {
     if (!_identity_store->load("_main", self_id)) {
-      self_id = mesh::LocalIdentity(&trng);  // create new random identity
+      self_id = radio_new_identity();  // create new random identity
       saveMainIdentity(self_id);
     }
   }
@@ -271,8 +267,8 @@ protected:
 
 public:
 
-  BaseCompanionRadioMesh(RADIO_CLASS& phy, RadioLibWrapper& rw, mesh::RNG& rng, mesh::RTCClock& rtc, SimpleMeshTables& tables, mesh::MainBoard& board, const char* psk, float freq, uint8_t sf, float bw, uint8_t cr, uint8_t tx_power)
-     : BaseChatMesh(rw, *new ArduinoMillis(), rng, rtc, *new StaticPoolPacketManager(16), tables), _serial(NULL), _phy(&phy), _board(&board), _psk(psk)
+  BaseCompanionRadioMesh(mesh::Radio& radio, mesh::RNG& rng, mesh::RTCClock& rtc, SimpleMeshTables& tables, mesh::MainBoard& board, const char* psk, float freq, uint8_t sf, float bw, uint8_t cr, uint8_t tx_power)
+     : BaseChatMesh(radio, *new ArduinoMillis(), rng, rtc, *new StaticPoolPacketManager(16), tables), _serial(NULL), _board(&board), _psk(psk)
   {
     _iter_started = false;
     offline_queue_len = 0;
@@ -294,7 +290,7 @@ public:
     //_prefs.rx_delay_base = 10.0f;  enable once new algo fixed
   }
 
-  virtual void begin(FILESYSTEM& fs, mesh::RNG& trng);
+  virtual void begin(FILESYSTEM& fs);
   const char* getNodeName() { return _prefs.node_name; }
   uint32_t getBLEPin() { return _active_ble_pin; }
   virtual void startInterface(BaseSerialInterface& serial);
