@@ -77,7 +77,8 @@ class T1000eMesh : public BaseCompanionRadioMesh {
   uint32_t active_state_duration = BLE_ACTIVE_STATE_DURATION * 1000;
   bool gps_active;
   bool _repeat_en = false;
-  
+  int8_t ble_tx;
+ 
   unsigned int last_uptime = 0;
   unsigned int activation_time;
 
@@ -87,6 +88,38 @@ public:
      _nmea(&nmea), _pwm(nRF52_PWM(LED_PIN, 1000.0f, 100.0f)), state{SLEEP}, state_activation_time(millis()), 
       gps_active(false) {
       activation_time = millis();
+      ble_tx = Bluefruit.getTxPower();
+  }
+
+  void loadT1000Prefs() {
+    File file = _fs->open("/t1000_prefs");
+    if (file) {
+      int8_t val;
+      uint32_t uintval;
+      int ret;
+      if (ret = file.read(&uintval, sizeof(uintval))) 
+        active_state_duration = uintval;
+      if (ret = file.read(&val, 1)) gps_active = (val != 0);
+      if (ret = file.read(&val, 1)) {
+        ble_tx = val;
+        Bluefruit.setTxPower(ble_tx);
+      }
+      file.close();
+    }
+  }
+
+  void saveT1000Prefs() {
+    File file = _fs->open("/t1000_prefs", FILE_O_WRITE);
+    if (file) { 
+      file.seek(0); 
+      file.truncate(); 
+      file.write((uint8_t*)&active_state_duration, sizeof(active_state_duration));
+
+      uint8_t gpval = gps_active ? 1 : 0;
+      file.write(&gpval, 1);
+      file.write((uint8_t*)&ble_tx, 1);
+      file.close();
+    }
   }
 
   bool allowPacketForward(const mesh::Packet* packet) override {
@@ -228,8 +261,20 @@ public:
     pinMode(GPS_RESETB, INPUT_PULLUP);
   }
 
-  void stop_gps() {
+  void sleep_gps() {
     digitalWrite(GPS_VRTC_EN, HIGH);
+    digitalWrite(GPS_EN, LOW);
+    digitalWrite(GPS_RESET, HIGH);
+    digitalWrite(GPS_SLEEP_INT, HIGH);
+    digitalWrite(GPS_RTC_INT, LOW);
+    pinMode(GPS_RESETB, OUTPUT);
+    digitalWrite(GPS_RESETB, LOW);
+    //_nmea->stop();
+  }
+
+  void stop_gps() {
+    digitalWrite(GPS_VRTC_EN, LOW);
+    digitalWrite(GPS_EN, LOW);
     digitalWrite(GPS_RESET, HIGH);
     digitalWrite(GPS_SLEEP_INT, HIGH);
     digitalWrite(GPS_RTC_INT, LOW);
@@ -320,11 +365,14 @@ public:
       } else {
         strcpy(reply, "Don't forget to activate gps");
       }
+    } else if (memcmp(command, "reboot", 6) == 0) {
+      _board->reboot();
     } else if (memcmp(command, "set ", 4) == 0) {
       const char* config = &command[4];
       if (memcmp(config, "blesleep ", 9) == 0) {
         active_state_duration = 1000 * atoi(&config[9]);
         strcpy(reply, "ok");
+        saveT1000Prefs();
       } else if (memcmp(config, "pin ", 4) == 0) {
         _prefs.ble_pin = atoi(&config[4]);
         savePrefs();
@@ -332,11 +380,14 @@ public:
       } else if (memcmp(config, "gps ", 4) == 0) {
         if (memcmp(&config[4], "on", 2) == 0) {
           gps_active = true;
+          start_gps();
           strcpy(reply, "gps on");
         } else {
           gps_active = false;
+          stop_gps();
           strcpy(reply, "gps off");
         }
+        saveT1000Prefs();
       } else if (memcmp(config, "repeat ", 7) == 0) {
         if (memcmp(&config[7], "on", 2) == 0) {
           _repeat_en = true;
@@ -347,7 +398,9 @@ public:
         }
       } else if (memcmp(config, "ble_tx ", 7) == 0) {
         Bluefruit.setTxPower(atoi(&config[7]));
-        sprintf(reply, "ble tx power %d", Bluefruit.getTxPower());
+        ble_tx = Bluefruit.getTxPower();
+        sprintf(reply, "ble tx power %d", ble_tx);
+        saveT1000Prefs();
       }
     } else if (memcmp(command, "get ", 4) == 0) {
       const char* config = &command[4];
@@ -369,6 +422,9 @@ public:
 
   void begin(FILESYSTEM& fs) override {
     BaseCompanionRadioMesh::begin(fs);
+
+    loadT1000Prefs();
+
     if (_fs->exists("uptime")) {
       _fs->rename("uptime", "last_uptime");
       File file = _fs->open("last_uptime");
@@ -379,7 +435,10 @@ public:
     }
 
     if (gps_active) {
-      _nmea->begin();
+//      _nmea->begin();
+      start_gps();
+    } else {
+      sleep_gps(); // let gps vrtc active
     }
   }
 
@@ -439,7 +498,7 @@ void setup() {
   sprintf(dev_name, "MeshCore-%s", the_mesh.getNodeName());
   serial_interface.begin(dev_name, the_mesh.getBLEPin());
 
-  Bluefruit.setTxPower(-16);    // Check bluefruit.h for supported values
+//  Bluefruit.setTxPower(-16);    // Check bluefruit.h for supported values
 
   the_mesh.startInterface(serial_interface);
 
