@@ -7,11 +7,6 @@
 
 #include "helpers/MicroNMEALocationProvider.h"
 
-//#define _PWM_LOGLEVEL_       4
-
-#define USING_TIMER false
-#include "nRF52_PWM.h"
-
 #ifndef LORA_FREQ
   #define LORA_FREQ   915.0
 #endif
@@ -70,7 +65,6 @@ SimpleMeshTables tables;
 class T1000eMesh : public BaseCompanionRadioMesh {
   bool gps_time_sync_needed = true;
   LocationProvider* _nmea;
-  nRF52_PWM _pwm;
 
   enum {SLEEP=0, ACTIVE=1} state;
   uint32_t state_activation_time = 0;
@@ -78,6 +72,7 @@ class T1000eMesh : public BaseCompanionRadioMesh {
   bool gps_active;
   bool _repeat_en = false;
   int8_t ble_tx;
+  uint8_t _rx_boost = 1;
  
   unsigned int last_uptime = 0;
   unsigned int activation_time;
@@ -85,7 +80,7 @@ class T1000eMesh : public BaseCompanionRadioMesh {
 public:
   T1000eMesh(mesh::Radio& radio, mesh::RNG& rng, mesh::RTCClock& rtc, SimpleMeshTables& tables, LocationProvider& nmea)
      : BaseCompanionRadioMesh(radio, rng, rtc, tables, board, PUBLIC_GROUP_PSK, LORA_FREQ, LORA_SF, LORA_BW, LORA_CR, LORA_TX_POWER), 
-     _nmea(&nmea), _pwm(nRF52_PWM(LED_PIN, 1000.0f, 100.0f)), state{SLEEP}, state_activation_time(millis()), 
+     _nmea(&nmea), state{SLEEP}, state_activation_time(millis()), 
       gps_active(false) {
       activation_time = millis();
       ble_tx = Bluefruit.getTxPower();
@@ -104,6 +99,10 @@ public:
         ble_tx = val;
         Bluefruit.setTxPower(ble_tx);
       }
+      if (ret = file.read(&val, 1)) {
+        _rx_boost = val;
+        apply_rx_boost();
+      }
       file.close();
     }
   }
@@ -118,8 +117,14 @@ public:
       uint8_t gpval = gps_active ? 1 : 0;
       file.write(&gpval, 1);
       file.write((uint8_t*)&ble_tx, 1);
+      file.write(&_rx_boost, 1);
       file.close();
     }
+  }
+
+  void apply_rx_boost() {
+    bool boost = _rx_boost == 1 || (_rx_boost == 2 && !state);
+    ((CustomLR1110Wrapper*) _radio)->setRxBoostedGainMode(boost);
   }
 
   bool allowPacketForward(const mesh::Packet* packet) override {
@@ -133,24 +138,20 @@ public:
       static int cycles;
       bool gps_fix = _nmea->isValid();
       bool has_msg = getUnreadMsgNb() > 0;
-      int pwm_level;
 
       if ((++cycles)%2 == 0) {
-        pwm_level = (gps_active && gps_fix)? 40 : 0;
-        next_led_update = gps_active ? futureMillis(1000) : futureMillis(2000);
+        digitalWrite(LED_PIN, LOW);
+        next_led_update = (gps_active && gps_fix) ? futureMillis(2000) : futureMillis(5000);
       } else {
+        digitalWrite(LED_PIN,HIGH);
         if (has_msg) {
-          pwm_level = 95;
           next_led_update = futureMillis(200);
         } else if (state == SLEEP) {
           next_led_update = futureMillis(2000);
-          pwm_level = 20;
         } else {
-          pwm_level = 30;
           next_led_update = futureMillis(1000);
         }
       }
-      _pwm.setPWM(LED_PIN, 1000, pwm_level);
     }
   }
 
@@ -169,7 +170,7 @@ public:
   void reactivate() {
     if (state == SLEEP) {
       state = ACTIVE;
-      //_serial->enable();
+      apply_rx_boost();
       Bluefruit.Advertising.start(0); 
     }
     state_activation_time = millis();
@@ -177,8 +178,8 @@ public:
 
   void deactivate() {
     state = SLEEP;
-//    _serial->disable();
     Bluefruit.Advertising.stop();
+    apply_rx_boost();
     state_activation_time = millis();
   }
 
@@ -218,7 +219,7 @@ public:
       bool btnChanged = (btnState != lastBtnState);
       if (btnChanged && (btnState == LOW)) { // low = release
         if (millis() > lastBtnChangedTime + 4000) { // poweroff
-          _pwm.setPWM(LED_PIN, 0, 0);
+          digitalWrite(LED_PIN, LOW);
           delay(10);
           board.powerOff();
         } else if (millis() > lastBtnChangedTime + 1000) {
@@ -388,6 +389,19 @@ public:
           strcpy(reply, "gps off");
         }
         saveT1000Prefs();
+      } else if (memcmp(config, "rx_boost ", 9) == 0) {  
+        if (memcmp(&config[9], "on", 2) == 0) {
+          _rx_boost = 1;
+          strcpy(reply, "rx_boost on");
+        } else if (memcmp(&config[9], "off", 2) == 0) {
+          _rx_boost = 0;
+          strcpy(reply, "rx_boost off");
+        } else if (memcmp(&config[9], "auto", 2) == 0) {
+          _rx_boost = 2;
+          strcpy(reply, "rx_boost auto");
+        }
+        saveT1000Prefs();
+        apply_rx_boost();
       } else if (memcmp(config, "repeat ", 7) == 0) {
         if (memcmp(&config[7], "on", 2) == 0) {
           _repeat_en = true;
@@ -414,6 +428,8 @@ public:
         sprintf(reply, "prefs ble pin %d, active ble pin %d", _prefs.ble_pin, _active_ble_pin);
       } else if (memcmp(config, "ble_tx", 6) == 0) {
         sprintf(reply, "ble tx power %d", Bluefruit.getTxPower());
+      } else if (memcmp(config, "rx_boost", 8) == 0) {
+        sprintf(reply, "rx_boost %s", !_rx_boost ? "off" : _rx_boost == 2 ? "auto" : "on");
       }
     } else { // delegate to base cli
       sprintf(reply, "Unknown command %s", command);
@@ -440,9 +456,13 @@ public:
     } else {
       sleep_gps(); // let gps vrtc active
     }
+
+    apply_rx_boost();
   }
 
   void loop() {
+    int msec = millis();
+
     BaseCompanionRadioMesh::loop();
     if (gps_active) gpsHandler();
     buttonHandler();
@@ -460,7 +480,11 @@ public:
         file.close();
       }
       
-      next_uptime_write = futureMillis(60*1000); // every minute
+      next_uptime_write = futureMillis(600*1000); // every ten minutes
+    }
+
+    while (millis() - msec < 100 && !digitalRead(LORA_DIO_1) && ! _mgr->getOutboundCount()) {  
+      delay (10);
     }
   }
 };
@@ -486,6 +510,9 @@ void setup() {
   digitalWrite(GPS_RTC_INT, LOW);
   pinMode(GPS_RESETB, OUTPUT);
   digitalWrite(GPS_RESETB, LOW);
+
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(PIN_3V3_EN, LOW);
 
   if (!radio_init()) { halt(); }
 
@@ -535,5 +562,12 @@ void cli_loop() {
 void loop() {
   cli_loop();
   the_mesh.loop();
-  delay(1); // sync on tick
+}
+
+// Try to provide a hook so the device can be in wfe in idle mode
+
+extern "C" {
+  void vApplicationIdleHook( void ) {
+    waitForEvent();
+  }
 }
