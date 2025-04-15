@@ -44,6 +44,28 @@ GPS status :
 * medium press (>1s) : toggles gps
 * short press : activates BLE adevertising for 5min
 
+### Cli
+
+This firmware features a cli, accessible through serial port or with meshcli (using `meshcli cli cmd` or `meshcli @cmd`)
+
+Commands are the following :
+* `advert`: send avert
+* `floodadv`: send flood advert
+* `uptime`: print uptime
+* `bat`: give bat status (percent and voltage)
+* `reboot`: reboots the device
+* `pinval`: reads a pin of the MCU
+* `gps_sync`: sync time at next gps fix
+* `get/set` : change a toggle/parameter
+
+Parameters are :
+* `blesleep`: time before ble advertisement stops
+* `ble_tx`: bluetooth tx power
+* `pin`: bluetooth pairing pin
+* `gps`: toggle gps on/off
+* `repeat`: toggle repeat (not saved, off by default)
+* `rx_boost`: set rx_boost, can be `on`, `off` or `auto` where `rx_boost` is active when ble is active ...
+
 ## To compile the firmware
 
 The firmware are build using PlatformIO on VSCode.
