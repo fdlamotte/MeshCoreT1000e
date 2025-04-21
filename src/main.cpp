@@ -420,6 +420,8 @@ public:
       const char* config = &command[4];
       if (memcmp(config, "blesleep", 9) == 0) {
         sprintf(reply, "blesleep = %d", active_state_duration / 1000);
+      } else if (memcmp(config, "gps_fix", 7) == 0) {
+        sprintf(reply, "gps fix %s", _nmea->isValid() ? "ok" : "no fix");
       } else if (memcmp(config, "gps", 3) == 0) {
         sprintf(reply, "gps %s", gps_active ? "on" : "off");
       } else if (memcmp(config, "repeat", 6) == 0) {
@@ -483,8 +485,11 @@ public:
       next_uptime_write = futureMillis(600*1000); // every ten minutes
     }
 
-    while (millis() - msec < 100 && !digitalRead(LORA_DIO_1) && ! _mgr->getOutboundCount()) {  
+    while (!gps_active && millis() - msec < 100 && !digitalRead(LORA_DIO_1) && ! _mgr->getOutboundCount()) {  
       delay (10);
+    }
+    if (gps_active) {
+      delay(1);
     }
   }
 };
