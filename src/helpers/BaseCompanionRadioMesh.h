@@ -60,14 +60,14 @@
 
 #define  PUBLIC_GROUP_PSK  "izOH6cXN6mrJ5e26oRXNcg=="
 
-#define FIRMWARE_VER_CODE    3
+#define FIRMWARE_VER_CODE    4
 
 #ifndef FIRMWARE_BUILD_DATE
-  #define FIRMWARE_BUILD_DATE   "14 Apr 2025"
+  #define FIRMWARE_BUILD_DATE   "21 Apr 2025"
 #endif
 
 #ifndef FIRMWARE_VERSION
-  #define FIRMWARE_VERSION   "v1.4.3_fdl"
+  #define FIRMWARE_VERSION   "v1.5.1_fdl"
 #endif
 
 #define CMD_APP_START              1
@@ -107,6 +107,7 @@
 #define CMD_SIGN_FINISH           35
 #define CMD_SEND_TRACE_PATH       36
 #define CMD_SET_DEVICE_PIN        37
+#define CMD_SET_OTHER_PARAMS      38
 
 #define RESP_CODE_OK                0
 #define RESP_CODE_ERR               1
@@ -141,6 +142,7 @@
 #define PUSH_CODE_STATUS_RESPONSE   0x87
 #define PUSH_CODE_LOG_RX_DATA       0x88
 #define PUSH_CODE_TRACE_DATA        0x89
+#define PUSH_CODE_NEW_ADVERT        0x8A
 
 #define ERR_CODE_UNSUPPORTED_CMD      1
 #define ERR_CODE_NOT_FOUND            2
@@ -161,7 +163,7 @@ struct NodePrefs {  // persisted to file
   uint8_t sf;
   uint8_t cr;
   uint8_t reserved1;
-  uint8_t reserved2;
+  uint8_t manual_add_contacts;
   float bw;
   uint8_t tx_power_dbm;
   uint8_t unused[3];
@@ -215,6 +217,10 @@ protected:
 
   bool saveMainIdentity(const mesh::LocalIdentity& identity) {
     return _identity_store->save("_main", identity);
+  }
+
+  bool isAutoAddEnabled() const override {
+    return (_prefs.manual_add_contacts & 1) == 0;
   }
 
   void loadContacts();

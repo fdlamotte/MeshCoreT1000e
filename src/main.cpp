@@ -368,6 +368,10 @@ public:
       }
     } else if (memcmp(command, "reboot", 6) == 0) {
       _board->reboot();
+    } else if (memcmp(command, "saveprefs", 9) == 0) {
+        savePrefs();
+        saveT1000Prefs();
+        strcpy(reply, "prefs saved");
     } else if (memcmp(command, "set ", 4) == 0) {
       const char* config = &command[4];
       if (memcmp(config, "blesleep ", 9) == 0) {

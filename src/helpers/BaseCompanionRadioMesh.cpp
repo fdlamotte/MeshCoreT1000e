@@ -132,7 +132,7 @@ void BaseCompanionRadioMesh::loadPrefsInt(const char* filename) {
     file.read((uint8_t *) &_prefs.sf, sizeof(_prefs.sf));  // 60
     file.read((uint8_t *) &_prefs.cr, sizeof(_prefs.cr));  // 61
     file.read((uint8_t *) &_prefs.reserved1, sizeof(_prefs.reserved1));  // 62
-    file.read((uint8_t *) &_prefs.reserved2, sizeof(_prefs.reserved2));  // 63
+    file.read((uint8_t *) &_prefs.manual_add_contacts, sizeof(_prefs.manual_add_contacts));  // 63
     file.read((uint8_t *) &_prefs.bw, sizeof(_prefs.bw));  // 64
     file.read((uint8_t *) &_prefs.tx_power_dbm, sizeof(_prefs.tx_power_dbm));  // 68
     file.read((uint8_t *) _prefs.unused, sizeof(_prefs.unused));  // 69
@@ -297,9 +297,13 @@ void BaseCompanionRadioMesh::logRxRaw(float snr, float rssi, const uint8_t raw[]
 
 void BaseCompanionRadioMesh::onDiscoveredContact(ContactInfo& contact, bool is_new) {
   if (_serial->isConnected()) {
-    out_frame[0] = PUSH_CODE_ADVERT;
-    memcpy(&out_frame[1], contact.id.pub_key, PUB_KEY_SIZE);
-    _serial->writeFrame(out_frame, 1 + PUB_KEY_SIZE);
+    if (!isAutoAddEnabled() && is_new) {
+      writeContactRespFrame(PUSH_CODE_NEW_ADVERT, contact);
+    } else {
+      out_frame[0] = PUSH_CODE_ADVERT;
+      memcpy(&out_frame[1], contact.id.pub_key, PUB_KEY_SIZE);
+      _serial->writeFrame(out_frame, 1 + PUB_KEY_SIZE);
+    }
   } else {
     soundBuzzer();
   }
@@ -450,6 +454,10 @@ void BaseCompanionRadioMesh::onContactResponse(const ContactInfo& contact, const
 }
 
 void BaseCompanionRadioMesh::onRawDataRecv(mesh::Packet* packet) {
+  if (packet->payload_len + 4 > sizeof(out_frame)) {
+    MESH_DEBUG_PRINTLN("onRawDataRecv(), payload_len too long: %d", packet->payload_len);
+    return;
+  }
   int i = 0;
   out_frame[i++] = PUSH_CODE_RAW_DATA;
   out_frame[i++] = (int8_t)(_radio->getLastSNR() * 4);
@@ -559,7 +567,7 @@ void BaseCompanionRadioMesh::savePrefs() {
       file.write((uint8_t *) &_prefs.sf, sizeof(_prefs.sf));  // 60
       file.write((uint8_t *) &_prefs.cr, sizeof(_prefs.cr));  // 61
       file.write((uint8_t *) &_prefs.reserved1, sizeof(_prefs.reserved1));  // 62
-      file.write((uint8_t *) &_prefs.reserved2, sizeof(_prefs.reserved2));  // 63
+      file.write((uint8_t *) &_prefs.manual_add_contacts, sizeof(_prefs.manual_add_contacts));  // 63
       file.write((uint8_t *) &_prefs.bw, sizeof(_prefs.bw));  // 64
       file.write((uint8_t *) &_prefs.tx_power_dbm, sizeof(_prefs.tx_power_dbm));  // 68
       file.write((uint8_t *) _prefs.unused, sizeof(_prefs.unused));  // 69
@@ -600,12 +608,15 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
     out_frame[i++] = MAX_LORA_TX_POWER;
     memcpy(&out_frame[i], self_id.pub_key, PUB_KEY_SIZE); i += PUB_KEY_SIZE;
 
-    int32_t lat, lon, alt = 0;
+    int32_t lat, lon;
     lat = (_prefs.node_lat * 1000000.0);
     lon = (_prefs.node_lon * 1000000.0);
     memcpy(&out_frame[i], &lat, 4); i += 4;
     memcpy(&out_frame[i], &lon, 4); i += 4;
-    memcpy(&out_frame[i], &alt, 4); i += 4;
+    out_frame[i++] = 0;  // reserved
+    out_frame[i++] = 0;  // reserved
+    out_frame[i++] = 0;  // reserved
+    out_frame[i++] = _prefs.manual_add_contacts;
 
     uint32_t freq = _prefs.freq * 1000;
     memcpy(&out_frame[i], &freq, 4); i += 4;
@@ -812,6 +823,7 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
       // export SELF
       auto pkt = createSelfAdvert(_prefs.node_name, _prefs.node_lat, _prefs.node_lon);
       if (pkt) {
+        pkt->header |= ROUTE_TYPE_FLOOD;  // would normally be sent in this mode
         out_frame[0] = RESP_CODE_EXPORT_CONTACT;
         uint8_t out_len =  pkt->writeTo(&out_frame[1]);
         releasePacket(pkt);  // undo the obtainNewPacket()
@@ -887,6 +899,10 @@ void BaseCompanionRadioMesh::handleCmdFrame(size_t len) {
     memcpy(&af, &cmd_frame[i], 4); i += 4;
     _prefs.rx_delay_base = ((float)rx) / 1000.0f;
     _prefs.airtime_factor = ((float)af) / 1000.0f;
+    savePrefs();
+    writeOKFrame();
+  } else if (cmd_frame[0] == CMD_SET_OTHER_PARAMS) {
+    _prefs.manual_add_contacts = cmd_frame[1];
     savePrefs();
     writeOKFrame();
   } else if (cmd_frame[0] == CMD_REBOOT && memcmp(&cmd_frame[1], "reboot", 6) == 0) {

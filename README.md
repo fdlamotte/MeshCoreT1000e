@@ -57,6 +57,7 @@ Commands are the following :
 * `pinval`: reads a pin of the MCU
 * `gps_sync`: sync time at next gps fix
 * `get/set` : change a toggle/parameter
+* `saveprefs` : write prefs to flash (usefull for storing gps position)
 
 Parameters are :
 * `blesleep`: time before ble advertisement stops
